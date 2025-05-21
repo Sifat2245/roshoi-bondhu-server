@@ -46,11 +46,12 @@ const run = async () => {
             const result = await recipeCollection
             .find()
             .sort({likeCount: -1})
-            .limit(6)
+            .limit(8)
             .toArray()
 
             res.send(result)
         })
+        
 
 
         //getting data by id
