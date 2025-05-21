@@ -1,6 +1,6 @@
 const express = require('express');
 const cors = require('cors');
-const {MongoClient, ServerApiVersion, ObjectId} = require('mongodb');
+const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 require('dotenv').config()
 const app = express()
 const port = process.env.PORT || 3000
@@ -19,16 +19,16 @@ const client = new MongoClient(uri, {
 });
 
 
-const run = async() =>{
-    try{
+const run = async () => {
+    try {
         await client.connect()
 
-        
+
         const recipeCollection = client.db('RoshoiBondhu').collection('AllRecipes')
         const userCollection = client.db('RoshoiBondhu').collection('Users')
 
         //posting data in db
-        app.post('/AllRecipes', async(req, res) =>{
+        app.post('/AllRecipes', async (req, res) => {
             const newRecipe = req.body;
             const result = await recipeCollection.insertOne(newRecipe)
             // console.log(newRecipe);
@@ -36,24 +36,40 @@ const run = async() =>{
         })
 
         // getting data
-        app.get('/AllRecipes', async(req, res) =>{
+        app.get('/AllRecipes', async (req, res) => {
             const result = await recipeCollection.find().toArray()
             res.send(result)
         })
 
         //getting data by id
-        app.get('/AllRecipes/:id', async(req, res) =>{
+        app.get('/AllRecipes/:id', async (req, res) => {
             const id = req.params.id;
-            const query = {_id: new ObjectId(id)}
+            const query = { _id: new ObjectId(id) }
             const result = await recipeCollection.findOne(query)
             res.send(result)
         })
 
+        //updating like count
+        app.put('/AllRecipes/:id', async (req, res) => {
+            const id = req.params.id;
+            const filter = { _id: new ObjectId(id) }
+            const options = { upsert: true }
+            const updatedLikeCount = req.body
+            const updatedDoc = {
+                $set: updatedLikeCount
+            }
 
-        await client.db('admin').command({ping: 1})
+            const result = await recipeCollection.updateOne(filter, updatedDoc, options)
+            res.send(result)
+
+        })
+
+
+        await client.db('admin').command({ ping: 1 })
         console.log('connected');
     }
-    finally{
+    finally {
+
 
     }
 }
@@ -61,11 +77,11 @@ const run = async() =>{
 run().catch(console.dir)
 
 
-app.get('/', (req,res) =>{
+app.get('/', (req, res) => {
     res.send('Welcome To RoshoiBondhu DataBase')
 })
 
-app.listen(port, () =>{
+app.listen(port, () => {
     console.log(`the sever is running on port ${port}`);
 })
 
