@@ -21,7 +21,7 @@ const client = new MongoClient(uri, {
 
 const run = async () => {
     try {
-        await client.connect()
+        // await client.connect()
 
 
         const recipeCollection = client.db('RoshoiBondhu').collection('AllRecipes')
@@ -40,6 +40,18 @@ const run = async () => {
             const result = await recipeCollection.find().toArray()
             res.send(result)
         })
+
+        //getting top recipes
+        app.get('/top-recipes', async(req, res) =>{
+            const result = await recipeCollection
+            .find()
+            .sort({likeCount: -1})
+            .limit(6)
+            .toArray()
+
+            res.send(result)
+        })
+
 
         //getting data by id
         app.get('/AllRecipes/:id', async (req, res) => {
@@ -65,8 +77,8 @@ const run = async () => {
         })
 
 
-        await client.db('admin').command({ ping: 1 })
-        console.log('connected');
+        // await client.db('admin').command({ ping: 1 })
+        // console.log('connected');
     }
     finally {
 
