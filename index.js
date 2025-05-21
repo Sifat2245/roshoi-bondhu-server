@@ -31,7 +31,7 @@ const run = async() =>{
         app.post('/AllRecipes', async(req, res) =>{
             const newRecipe = req.body;
             const result = await recipeCollection.insertOne(newRecipe)
-            console.log(newRecipe);
+            // console.log(newRecipe);
             res.send(result)
         })
 
