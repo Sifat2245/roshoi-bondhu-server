@@ -42,16 +42,16 @@ const run = async () => {
         })
 
         //getting top recipes
-        app.get('/top-recipes', async(req, res) =>{
+        app.get('/top-recipes', async (req, res) => {
             const result = await recipeCollection
-            .find()
-            .sort({likeCount: -1})
-            .limit(8)
-            .toArray()
+                .find()
+                .sort({ likeCount: -1 })
+                .limit(8)
+                .toArray()
 
             res.send(result)
         })
-        
+
 
 
         //getting data by id
@@ -63,11 +63,25 @@ const run = async () => {
         })
 
         //getting data by email
-        app.get('/AllRecipe/:email', async(req, res) =>{
+        app.get('/AllRecipe/:email', async (req, res) => {
             const email = req.params.email;
-            const query = {userEmail: email}
-            const cursor = recipeCollection.find(query)
-            const result = await cursor.toArray()
+            const query = { userEmail: email }
+            const result = await recipeCollection.findOne(query)
+            res.send(result)
+        })
+
+        //updating post data
+
+        app.put('/AllRecipes/:id', async (req, res) => {
+            const id = req.params.id;
+            const filter = { _id: new ObjectId(id) }
+            const options = { upsert: true };
+            const UpdatedRecipe = req.body;
+            const updatedDoc = {
+                $set: UpdatedRecipe
+            }
+
+            const result = await recipeCollection.updateOne(filter, updatedDoc, options)
             res.send(result)
         })
 
@@ -86,17 +100,25 @@ const run = async () => {
 
         })
 
+        // delete post
+        app.delete('/AllRecipes/:id', async (req, res) => {
+            const id = req.params.id;
+            const query = { _id: new ObjectId(id) }
+            const result = await recipeCollection.deleteOne(query)
+            res.send(result)
+        })
+
 
 
         //users api
-        app.post('/users', async(req, res) =>{
+        app.post('/users', async (req, res) => {
             const newUser = req.body;
             const result = await userCollection.insertOne(newUser)
             res.send(result)
         })
 
         // get user data as json
-        app.get('/users', async(req, res) =>{
+        app.get('/users', async (req, res) => {
             const result = await userCollection.find().toArray()
             res.send(result)
         })
