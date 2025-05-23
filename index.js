@@ -62,6 +62,15 @@ const run = async () => {
             res.send(result)
         })
 
+        //getting data by email
+        app.get('/AllRecipe/:email', async(req, res) =>{
+            const email = req.params.email;
+            const query = {userEmail: email}
+            const cursor = recipeCollection.find(query)
+            const result = await cursor.toArray()
+            res.send(result)
+        })
+
         //updating like count
         app.put('/AllRecipes/:id', async (req, res) => {
             const id = req.params.id;
