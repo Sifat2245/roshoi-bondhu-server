@@ -78,6 +78,21 @@ const run = async () => {
         })
 
 
+
+        //users api
+        app.post('/users', async(req, res) =>{
+            const newUser = req.body;
+            const result = await userCollection.insertOne(newUser)
+            res.send(result)
+        })
+
+        // get user data as json
+        app.get('/users', async(req, res) =>{
+            const result = await userCollection.find().toArray()
+            res.send(result)
+        })
+
+
         // await client.db('admin').command({ ping: 1 })
         // console.log('connected');
     }
@@ -95,6 +110,6 @@ app.get('/', (req, res) => {
 })
 
 app.listen(port, () => {
-    console.log(`the sever is running on port ${port}`);
+    console.log(port);
 })
 
