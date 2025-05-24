@@ -66,7 +66,7 @@ const run = async () => {
         app.get('/AllRecipe/:email', async (req, res) => {
             const email = req.params.email;
             const query = { userEmail: email }
-            const result = await recipeCollection.findOne(query)
+            const result = await recipeCollection.find(query).toArray()
             res.send(result)
         })
 
