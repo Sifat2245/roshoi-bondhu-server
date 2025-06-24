@@ -18,6 +18,29 @@ This is the backend server for **Roshoi Bondhu** — a recipe-sharing platform w
 
 You can deploy this on platforms like **Render**, **Railway**, or **Vercel (for functions)** depending on your hosting choice.
 
+## 📌 API Endpoints
+
+### 🧑‍🍳 Recipes
+
+| Method | Endpoint            | Description                            |
+| ------ | ------------------- | -------------------------------------- |
+| POST   | `/AllRecipes`       | Add a new recipe                       |
+| GET    | `/AllRecipes`       | Get all recipes                        |
+| GET    | `/AllRecipes/:id`   | Get a single recipe by ID              |
+| GET    | `/AllRecipe/:email` | Get recipes by user email              |
+| PUT    | `/AllRecipes/:id`   | Update recipe or like count (upsert)   |
+| DELETE | `/AllRecipes/:id`   | Delete a recipe by ID                  |
+| GET    | `/top-recipes`      | Get top 8 recipes sorted by like count |
+
+### 👤 Users
+
+| Method | Endpoint | Description    |
+| ------ | -------- | -------------- |
+| POST   | `/users` | Add a new user |
+| GET    | `/users` | Get all users  |
+
+
+
 
 ## ⚙️ Setup & Run
 bash
