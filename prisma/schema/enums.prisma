@@ -1,0 +1,35 @@
+enum PlatformRole {
+  USER
+  MODERATOR
+  ADMIN
+}
+
+enum GroupRole {
+  ADMIN
+  MODERATOR
+  MEMBER
+}
+
+enum GroupPrivacy {
+  PUBLIC
+  PRIVATE
+}
+
+enum PostType {
+  CASUAL
+  RECIPE
+  REPOST
+}
+
+enum PostStatus {
+  PUBLISHED
+  PENDING_APPROVAL
+  REJECTED
+}
+
+enum ReportStatus {
+  PENDING
+  RESOLVED
+  DISMISSED
+}
+

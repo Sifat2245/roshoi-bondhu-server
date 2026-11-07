@@ -1,0 +1,34 @@
+model Group {
+  id                   String        @id @default(cuid())
+  name                 String
+  slug                 String        @unique
+  description          String?       @db.Text
+  coverImage           String?
+  avatar               String?
+  privacy              GroupPrivacy  @default(PUBLIC)
+  requiresPostApproval Boolean       @default(false)
+  createdById          String
+  createdBy            User          @relation("GroupCreator", fields: [createdById], references: [id], onDelete: Cascade)
+
+  members              GroupMember[]
+  posts                Post[]
+
+  createdAt            DateTime      @default(now())
+  updatedAt            DateTime      @updatedAt
+}
+
+model GroupMember {
+  id         String    @id @default(cuid())
+  groupId    String
+  group      Group     @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role       GroupRole @default(MEMBER)
+  isApproved Boolean   @default(true)
+  createdAt  DateTime  @default(now())
+
+  @@unique([groupId, userId])
+  @@index([groupId])
+  @@index([userId])
+}
+

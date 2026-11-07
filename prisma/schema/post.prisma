@@ -1,0 +1,65 @@
+model Post {
+  id              String      @id @default(cuid())
+  authorId        String
+  author          User        @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  
+  groupId         String?
+  group           Group?      @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  
+  postType        PostType    @default(CASUAL)
+  status          PostStatus  @default(PUBLISHED)
+
+  caption         String?     @db.Text
+  
+  title           String?
+  image           String?
+  images          String[]    @default([])
+  ingredients     Json?
+  instructions    Json?
+  preparationTime Int?
+  servings        Int?
+  cuisine         String?
+  categories      String[]    @default([])
+
+  originalPostId  String?
+  originalPost    Post?       @relation("Reposts", fields: [originalPostId], references: [id], onDelete: SetNull)
+  reposts         Post[]      @relation("Reposts")
+
+  likes           Like[]
+  comments        Comment[]
+
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  @@index([authorId])
+  @@index([groupId])
+}
+
+model Like {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  postId    String
+  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([userId, postId])
+  @@index([postId])
+}
+
+model Comment {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  postId    String
+  post      Post      @relation(fields: [postId], references: [id], onDelete: Cascade)
+  parentId  String?
+  parent    Comment?  @relation("CommentReplies", fields: [parentId], references: [id], onDelete: Cascade)
+  replies   Comment[] @relation("CommentReplies")
+  content   String    @db.Text
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@index([postId])
+}
+

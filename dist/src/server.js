@@ -1,0 +1,8 @@
+import dotenv from 'dotenv';
+dotenv.config();
+import app from './config/app.js';
+const port = process.env.PORT || 5000;
+app.listen(port, () => {
+    console.log(`[Hesheli Modular Server] running on http://localhost:${port}`);
+});
+export default app;
