@@ -2,7 +2,7 @@ import prisma from '../../lib/prisma.js';
 import { paginationUtils } from '../../utils/pagination.js';
 const getFeed = async (query, currentUserId) => {
     const { page, limit, skip } = paginationUtils.getPaginationOptions(query);
-    const { type, cuisine, search, authorId, groupId, filter } = query;
+    const { type, cuisine, search, authorId, groupId, filter, tag, maxTime } = query;
     const where = {
         status: 'PUBLISHED',
     };
@@ -18,11 +18,15 @@ const getFeed = async (query, currentUserId) => {
     if (groupId) {
         where.groupId = groupId;
     }
-    if (search) {
+    if (maxTime) {
+        where.preparationTime = { lte: parseInt(maxTime) };
+    }
+    if (search || tag) {
+        const keyword = search || tag;
         where.OR = [
-            { title: { contains: search, mode: 'insensitive' } },
-            { caption: { contains: search, mode: 'insensitive' } },
-            { cuisine: { contains: search, mode: 'insensitive' } },
+            { title: { contains: keyword, mode: 'insensitive' } },
+            { caption: { contains: keyword, mode: 'insensitive' } },
+            { cuisine: { contains: keyword, mode: 'insensitive' } },
         ];
     }
     if (filter === 'FOLLOWING' && currentUserId) {

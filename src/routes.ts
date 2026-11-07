@@ -1,0 +1,23 @@
+import { Router } from 'express';
+import { postRoutes } from './modules/posts/post.routes.js';
+import { groupRoutes } from './modules/groups/group.routes.js';
+import { userRoutes } from './modules/users/user.routes.js';
+import { adminRoutes } from './modules/admin/admin.routes.js';
+import { mediaRoutes } from './modules/media/media.routes.js';
+
+const router = Router();
+
+// Modular application REST routes
+router.use('/post', postRoutes);
+router.use('/posts', postRoutes);
+router.use('/group', groupRoutes);
+router.use('/groups', groupRoutes);
+router.use('/user', userRoutes);
+router.use('/users', userRoutes);
+router.use('/admin', adminRoutes);
+router.use('/upload', mediaRoutes);
+router.use('/media', mediaRoutes);
+
+export const appRouter = router;
+export default appRouter;
+

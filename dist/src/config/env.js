@@ -1,48 +1,21 @@
-import dotenv from "dotenv";
-import ms from "ms";
+import dotenv from 'dotenv';
 dotenv.config();
-const getTokenDuration = (name, fallback) => {
-    const value = (process.env[name] || fallback);
-    const milliseconds = ms(value);
-    if (!Number.isFinite(milliseconds) || milliseconds < 1000) {
-        throw new Error(`${name} must be a duration of at least one second, such as 1d.`);
-    }
-    return value;
+export const env = {
+    NODE_ENV: process.env.NODE_ENV || 'development',
+    PORT: parseInt(process.env.PORT || '5000', 10),
+    DATABASE_URL: process.env.DATABASE_URL || '',
+    BETTER_AUTH_SECRET: process.env.BETTER_AUTH_SECRET || 'hesheli-super-secret-key-fallback',
+    BETTER_AUTH_URL: process.env.BETTER_AUTH_URL || 'http://localhost:5000',
+    CLIENT_URL: process.env.CLIENT_URL || 'http://localhost:5173',
+    COOKIE_DOMAIN: process.env.COOKIE_DOMAIN,
+    JWT_ACCESS_SECRET: process.env.JWT_ACCESS_SECRET || 'hesheli-access-secret',
+    JWT_ACCESS_EXPIRES_IN: (process.env.JWT_ACCESS_EXPIRES_IN || '15m'),
+    JWT_REFRESH_SECRET: process.env.JWT_REFRESH_SECRET || 'hesheli-refresh-secret',
+    JWT_REFRESH_EXPIRES_IN: (process.env.JWT_REFRESH_EXPIRES_IN || '7d'),
+    BETTER_AUTH_SESSION_TOKEN_EXPIRES_IN: (process.env.BETTER_AUTH_SESSION_TOKEN_EXPIRES_IN || '7d'),
+    CLOUDINARY_CLOUD_NAME: process.env.CLOUDINARY_CLOUD_NAME,
+    CLOUDINARY_API_KEY: process.env.CLOUDINARY_API_KEY,
+    CLOUDINARY_API_SECRET: process.env.CLOUDINARY_API_SECRET,
 };
-const localEnvVariables = () => {
-    const requiredEnvVariables = [
-        "NODE_ENV",
-        "PORT",
-        "DATABASE_URL",
-        "DIRECT_URL",
-        "BETTER_AUTH_URL",
-        "BETTER_AUTH_SECRET",
-        "JWT_ACCESS_SECRET",
-        "JWT_REFRESH_SECRET",
-    ];
-    requiredEnvVariables.forEach((variable) => {
-        if (!process.env[variable]) {
-            throw new Error(`Environment variable ${variable} is required`);
-        }
-    });
-    return {
-        NODE_ENV: process.env.NODE_ENV,
-        PORT: process.env.PORT,
-        FRONTEND_URL: new URL(process.env.FRONTEND_URL || "http://localhost:3000").origin,
-        COOKIE_DOMAIN: process.env.COOKIE_DOMAIN?.trim() || undefined,
-        DATABASE_URL: process.env.DATABASE_URL,
-        DIRECT_URL: process.env.DIRECT_URL,
-        BETTER_AUTH_URL: process.env.BETTER_AUTH_URL,
-        BETTER_AUTH_SECRET: process.env.BETTER_AUTH_SECRET,
-        JWT_ACCESS_SECRET: process.env.JWT_ACCESS_SECRET,
-        JWT_REFRESH_SECRET: process.env.JWT_REFRESH_SECRET,
-        JWT_ACCESS_EXPIRES_IN: getTokenDuration("JWT_ACCESS_EXPIRES_IN", "1d"),
-        JWT_REFRESH_EXPIRES_IN: getTokenDuration("JWT_REFRESH_EXPIRES_IN", "7d"),
-        BETTER_AUTH_SESSION_TOKEN_EXPIRES_IN: getTokenDuration("BETTER_AUTH_SESSION_TOKEN_EXPIRES_IN", "1d"),
-        BETTER_AUTH_UPDATE_TOKEN_EXPIRES_IN: getTokenDuration("BETTER_AUTH_UPDATE_TOKEN_EXPIRES_IN", "1d"),
-        SEED_ADMIN_PASSWORD: process.env.SEED_ADMIN_PASSWORD || "Admin123!",
-        SEED_MENTOR_PASSWORD: process.env.SEED_MENTOR_PASSWORD || "Mentor123!",
-        SEED_STUDENT_PASSWORD: process.env.SEED_STUDENT_PASSWORD || "Student123!",
-    };
-};
-export const envVariables = localEnvVariables();
+export const envVariables = env;
+export default env;

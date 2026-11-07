@@ -1,0 +1,13 @@
+import { Router } from 'express';
+import { PostController } from './post.controller.js';
+import { requireAuth, optionalAuth } from '../../middleware/auth.middleware.js';
+const router = Router();
+router.get('/', optionalAuth, PostController.getFeed);
+router.get('/:id', optionalAuth, PostController.getPostById);
+router.post('/', requireAuth, PostController.createPost);
+router.post('/repost', requireAuth, PostController.repostPost);
+router.delete('/:id', requireAuth, PostController.deletePost);
+router.post('/:id/like', requireAuth, PostController.toggleLike);
+router.post('/:id/comments', requireAuth, PostController.createComment);
+export const postRoutes = router;
+export default postRoutes;
