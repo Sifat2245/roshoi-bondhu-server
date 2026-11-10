@@ -8,7 +8,15 @@ const getCookie = (req, key) => {
     return parseCookies(req.headers.cookie ?? "").get(key);
 };
 const clearCookie = (res, key, options = {}) => {
-    return res.clearCookie(key, { ...defaultCookieOptions, ...options });
+    const mergedOptions = {
+        ...defaultCookieOptions,
+        path: "/",
+        expires: new Date(0),
+        maxAge: 0,
+        ...options,
+    };
+    res.cookie(key, "", mergedOptions);
+    return res;
 };
 export const cookieUtils = {
     setCookie,

@@ -6,6 +6,7 @@ model User {
   image         String?
   bio           String?
   coverImage    String?
+  phone         String?
   role          PlatformRole  @default(USER)
   isBanned      Boolean       @default(false)
   createdAt     DateTime      @default(now())

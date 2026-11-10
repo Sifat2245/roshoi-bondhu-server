@@ -2,7 +2,10 @@ import { CatchAsync } from '../../shared/utils/catch-async.js';
 import { sendResponse } from '../../shared/utils/send-response.js';
 import { UserService } from './user.service.js';
 const getUserProfile = CatchAsync(async (req, res) => {
-    const userId = req.params.id;
+    let userId = req.params.id;
+    if (userId === 'me' && req.user?.id) {
+        userId = req.user.id;
+    }
     const result = await UserService.getUserProfile(userId, req.user?.id);
     sendResponse(res, {
         statusCode: 200,

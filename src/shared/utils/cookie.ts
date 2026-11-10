@@ -22,7 +22,15 @@ const clearCookie = (
   key: string,
   options: CookieOptions = {},
 ): Response => {
-  return res.clearCookie(key, { ...defaultCookieOptions, ...options });
+  const mergedOptions: CookieOptions = {
+    ...defaultCookieOptions,
+    path: "/",
+    expires: new Date(0),
+    maxAge: 0,
+    ...options,
+  };
+  res.cookie(key, "", mergedOptions);
+  return res;
 };
 
 export const cookieUtils = {

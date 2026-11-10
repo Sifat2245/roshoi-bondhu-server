@@ -1,53 +1,44 @@
-# Roshoi Bondhu Server
+# Heshel / Roshoi Bondhu backend
 
-This is the backend server for **Roshoi Bondhu** — a recipe-sharing platform where users can post, browse, like, and manage recipes. The server is built using **Node.js**, **Express**, and **MongoDB**, and provides RESTful APIs for managing recipes and users.
+Backend source for the recipe-sharing social platform, using **TypeScript, Express, PostgreSQL, Prisma, Better Auth and GraphQL Yoga**.
 
----
+## Backend design documentation
 
-## 🔧 Tech Stack
+Start with the [backend implementation handbook](docs/backend/README.md). It contains the current-source audit, proposed schema/relationships, scoped RBAC and privacy, end-to-end API workflows, a sequential roadmap after authentication, scaling/operations, migration/testing, and SQL integrity examples.
 
-- **Node.js** & **Express** – Backend framework  
-- **MongoDB** & **MongoDB Atlas** – NoSQL Database  
-- **dotenv** – For managing environment variables  
-- **cors** – Enabling cross-origin requests  
-- **ObjectId** – MongoDB unique identifier utility  
+The current Prisma source defines 11 models. The proposed complete roadmap describes 79 logical tables (74 core + 5 optional), introduced by feature phase. This is a design specification; these tables and new contracts have not been deployed by writing the documentation.
 
----
+- [What to build after authentication](docs/backend/06-implementation-roadmap.md)
+- [All proposed tables and relationships](docs/backend/03-database-schema.md)
+- [RBAC, group ownership and audiences](docs/backend/04-rbac-and-privacy.md)
+- [Current source gaps and API mismatches](docs/backend/01-current-state.md)
 
-## 🌍 Live Server
+## Current source layout
 
-You can deploy this on platforms like **Render**, **Railway**, or **Vercel (for functions)** depending on your hosting choice.
+- `src/modules/`: authentication, users, posts, groups, media, admin and health modules.
+- `src/graphql/`: GraphQL Yoga schema and actor context.
+- `src/lib/auth.ts`: Better Auth configuration.
+- `prisma/schema/`: PostgreSQL models and enums.
+- `prisma/seed.ts`: current seed entry point.
 
-## 📌 API Endpoints
+The existing source mounts provider authentication under `/api/auth/*`, application REST routes under `/api` and `/api/v1`, and GraphQL through Yoga. Existing legacy recipe routes and the canonical planned contracts differ; consult the source audit rather than assuming every documented target endpoint already exists.
 
-### 🧑‍🍳 Recipes
+## Development
 
-| Method | Endpoint            | Description                            |
-| ------ | ------------------- | -------------------------------------- |
-| POST   | `/AllRecipes`       | Add a new recipe                       |
-| GET    | `/AllRecipes`       | Get all recipes                        |
-| GET    | `/AllRecipes/:id`   | Get a single recipe by ID              |
-| GET    | `/AllRecipe/:email` | Get recipes by user email              |
-| PUT    | `/AllRecipes/:id`   | Update recipe or like count (upsert)   |
-| DELETE | `/AllRecipes/:id`   | Delete a recipe by ID                  |
-| GET    | `/top-recipes`      | Get top 8 recipes sorted by like count |
+Install from the repository's lockfile when available, configure the environment required by `src/config/env.ts` and `prisma.config.ts`, and use an isolated development database. Keep environment files and credentials out of version control.
 
-### 👤 Users
-
-| Method | Endpoint | Description    |
-| ------ | -------- | -------------- |
-| POST   | `/users` | Add a new user |
-| GET    | `/users` | Get all users  |
-
-
-
-
-## ⚙️ Setup & Run
-bash
-Copy
-Edit
-git clone https://github.com/Sifat2245/roshoi-bondhu-server.git
-cd roshoi-bondhu-server
+```sh
 npm install
-#### Add your .env file
-npm start
+npm run prisma:generate
+npm run dev
+```
+
+Use `npm run build` for TypeScript compilation. Review existing migration history before changing a populated database. Production schema changes require reviewed versioned migrations and a restore plan; do not use development `db push` as a production migration process.
+
+## Documentation validation
+
+```sh
+python3 docs/backend/validate_docs.py
+```
+
+This validates documentation consistency only. Backend integration, authorization, migration and load-test acceptance plans are documented separately and must be implemented alongside their feature phases.

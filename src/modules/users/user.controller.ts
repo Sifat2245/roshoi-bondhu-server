@@ -4,7 +4,10 @@ import { sendResponse } from '../../shared/utils/send-response.js';
 import { UserService } from './user.service.js';
 
 const getUserProfile = CatchAsync(async (req: Request, res: Response) => {
-  const userId = req.params.id as string;
+  let userId = req.params.id as string;
+  if (userId === 'me' && req.user?.id) {
+    userId = req.user.id;
+  }
   const result = await UserService.getUserProfile(userId, req.user?.id);
   sendResponse(res, {
     statusCode: 200,

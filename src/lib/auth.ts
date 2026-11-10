@@ -1,7 +1,9 @@
 import { betterAuth } from 'better-auth';
 import { prismaAdapter } from 'better-auth/adapters/prisma';
+import { emailOTP } from 'better-auth/plugins';
 import prisma from './prisma.js';
 import { env } from '../config/env.js';
+import EmailService from '../shared/services/email.service.js';
 
 export const auth = betterAuth({
   database: prismaAdapter(prisma, {
@@ -17,14 +19,63 @@ export const auth = betterAuth({
   ],
   emailAndPassword: {
     enabled: true,
-    autoSignIn: true,
+    autoSignIn: false, // Require email OTP verification before activating full session
+    requireEmailVerification: true,
   },
+  session: {
+    expiresIn: 60 * 60 * 24 * 365, // 1 year (within 400 days cookie spec) - persistent until user logs out
+    updateAge: 60 * 60 * 24 * 30, // 30 days
+  },
+  advanced: {
+    useSecureCookies: env.NODE_ENV === 'production',
+    cookiePrefix: 'heshel',
+  },
+  plugins: [
+    emailOTP({
+      expiresIn: 600, // 10 minutes (600 seconds)
+      sendVerificationOnSignUp: true,
+      generateOTP: () => Math.floor(100000 + Math.random() * 900000).toString(), // 6-digit numeric OTP
+      async sendVerificationOTP({ email, otp, type }) {
+        await EmailService.sendOtpEmail({ email, otp, type });
+      },
+    }),
+    {
+      id: 'token-logout-cleanup',
+      hooks: {
+        after: [
+          {
+            matcher(context: any) {
+              return context.path?.startsWith('/sign-out');
+            },
+            handler: async (c: any) => {
+              const isProd = env.NODE_ENV === 'production';
+              const clearOptions = {
+                path: '/',
+                maxAge: 0,
+                httpOnly: true,
+                secure: isProd,
+                sameSite: isProd ? ('none' as const) : ('lax' as const),
+              };
+              c.setCookie('accessToken', '', clearOptions);
+              c.setCookie('refreshToken', '', clearOptions);
+              c.setCookie('betterAuthSession', '', clearOptions);
+              c.setCookie('heshel.session_token', '', clearOptions);
+            },
+          },
+        ],
+      },
+    },
+  ],
   user: {
     additionalFields: {
       role: {
         type: 'string',
         defaultValue: 'USER',
         input: false,
+      },
+      phone: {
+        type: 'string',
+        required: false,
       },
       bio: {
         type: 'string',
@@ -44,4 +95,3 @@ export const auth = betterAuth({
 });
 
 export default auth;
-

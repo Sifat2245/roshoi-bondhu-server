@@ -6,6 +6,8 @@ export const userTypeDefs = /* GraphQL */ `
     image: String
     bio: String
     coverImage: String
+    phone: String
+    emailVerified: Boolean
     role: String!
   }
 

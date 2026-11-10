@@ -10,6 +10,7 @@ export const userRepository = {
                 image: true,
                 bio: true,
                 coverImage: true,
+                phone: true,
                 role: true,
                 isBanned: true,
                 createdAt: true,
@@ -39,6 +40,7 @@ export const userRepository = {
                 image: true,
                 bio: true,
                 coverImage: true,
+                phone: true,
                 role: true,
             },
         });

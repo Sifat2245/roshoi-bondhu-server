@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { authRoutes } from './modules/auth/auth.routes.js';
 import { postRoutes } from './modules/posts/post.routes.js';
 import { groupRoutes } from './modules/groups/group.routes.js';
 import { userRoutes } from './modules/users/user.routes.js';
@@ -8,6 +9,7 @@ import { mediaRoutes } from './modules/media/media.routes.js';
 const router = Router();
 
 // Modular application REST routes
+router.use('/auth', authRoutes);
 router.use('/post', postRoutes);
 router.use('/posts', postRoutes);
 router.use('/group', groupRoutes);
