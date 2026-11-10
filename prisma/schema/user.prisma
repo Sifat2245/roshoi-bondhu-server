@@ -5,10 +5,13 @@ model User {
   emailVerified Boolean       @default(false)
   image         String?
   bio           String?
-  coverImage    String?
-  phone         String?
-  role          PlatformRole  @default(USER)
-  isBanned      Boolean       @default(false)
+  coverImage       String?
+  phone            String?
+  role             PlatformRole  @default(USER)
+  status           UserStatus    @default(ACTIVE)
+  deletedAt        DateTime?
+  deactivatedUntil DateTime?
+  isBanned         Boolean       @default(false)
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
 
@@ -27,6 +30,10 @@ model User {
   // Social
   following     Follow[]      @relation("UserFollowing")
   followers     Follow[]      @relation("UserFollowers")
+
+  // Phase 2: Profiles & Preferences
+  profile       UserProfile?
+  preferences   UserPreference?
 }
 
 model Session {

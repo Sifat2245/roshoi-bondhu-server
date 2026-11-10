@@ -16,6 +16,7 @@ router.use('/group', groupRoutes);
 router.use('/groups', groupRoutes);
 router.use('/user', userRoutes);
 router.use('/users', userRoutes);
+router.use('/me', userRoutes);
 router.use('/admin', adminRoutes);
 router.use('/upload', mediaRoutes);
 router.use('/media', mediaRoutes);

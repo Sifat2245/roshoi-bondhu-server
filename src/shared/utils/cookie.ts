@@ -1,5 +1,4 @@
 import type { CookieOptions, Request, Response } from "express";
-import { parseCookies } from "better-auth/cookies";
 import { authCookieOptions } from "../../config/cookie.js";
 
 const defaultCookieOptions: CookieOptions = authCookieOptions;
@@ -14,7 +13,10 @@ const setCookie = (
 };
 
 const getCookie = (req: Request, key: string): string | undefined => {
-  return parseCookies(req.headers.cookie ?? "").get(key);
+  const cookieHeader = req.headers?.cookie;
+  if (!cookieHeader) return undefined;
+  const match = cookieHeader.match(new RegExp(`(?:^|;\\s*)${key}=([^;]*)`));
+  return match ? decodeURIComponent(match[1]) : undefined;
 };
 
 const clearCookie = (
@@ -40,4 +42,3 @@ export const cookieUtils = {
 };
 
 export default cookieUtils;
-

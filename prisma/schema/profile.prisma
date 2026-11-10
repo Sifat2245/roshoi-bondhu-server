@@ -1,0 +1,45 @@
+model UserProfile {
+  id                 String    @id @default(cuid())
+  userId             String    @unique
+  user               User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  username           String?   @unique
+  bio                String?
+  city               String?
+  work               String?
+  education          String?
+  birthDate          DateTime?
+  gender             String?
+  phone              String?
+  hometown           String?
+  languages          String?
+  expertise          String?
+  hobbies            String?
+  interests          String?
+  website            String?
+  socialLinks        String?
+  contactVisibility  String    @default("PUBLIC")
+  birthdayVisibility String    @default("FRIENDS")
+  version            Int       @default(1)
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  @@map("user_profiles")
+}
+
+model UserPreference {
+  id                  String   @id @default(cuid())
+  userId              String   @unique
+  user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  theme               String   @default("SYSTEM") // SYSTEM, LIGHT, DARK
+  locale              String   @default("bn") // bn, en
+  timezone            String   @default("Asia/Dhaka")
+  defaultPostAudience String   @default("PUBLIC") // PUBLIC, FRIENDS, ONLY_ME
+  friendRequestPolicy String   @default("EVERYONE") // EVERYONE, FRIENDS_OF_FRIENDS
+  messagePolicy       String   @default("EVERYONE") // EVERYONE, FRIENDS
+  twoFactorEnabled    Boolean  @default(false)
+  version             Int      @default(1)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@map("user_preferences")
+}

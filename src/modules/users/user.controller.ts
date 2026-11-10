@@ -3,6 +3,16 @@ import { CatchAsync } from '../../shared/utils/catch-async.js';
 import { sendResponse } from '../../shared/utils/send-response.js';
 import { UserService } from './user.service.js';
 
+const getMyProfile = CatchAsync(async (req: Request, res: Response) => {
+  const result = await UserService.getUserProfile(req.user!.id, req.user!.id);
+  sendResponse(res, {
+    statusCode: 200,
+    success: true,
+    message: 'My profile retrieved successfully.',
+    data: result,
+  });
+});
+
 const getUserProfile = CatchAsync(async (req: Request, res: Response) => {
   let userId = req.params.id as string;
   if (userId === 'me' && req.user?.id) {
@@ -38,11 +48,33 @@ const updateProfile = CatchAsync(async (req: Request, res: Response) => {
   });
 });
 
+const getPreferences = CatchAsync(async (req: Request, res: Response) => {
+  const result = await UserService.getPreferences(req.user!.id);
+  sendResponse(res, {
+    statusCode: 200,
+    success: true,
+    message: 'User preferences retrieved successfully.',
+    data: result,
+  });
+});
+
+const updatePreferences = CatchAsync(async (req: Request, res: Response) => {
+  const result = await UserService.updatePreferences(req.user!.id, req.body);
+  sendResponse(res, {
+    statusCode: 200,
+    success: true,
+    message: 'Preferences updated successfully!',
+    data: result,
+  });
+});
+
 export const UserController = {
+  getMyProfile,
   getUserProfile,
   toggleFollow,
   updateProfile,
+  getPreferences,
+  updatePreferences,
 };
 
 export default UserController;
-

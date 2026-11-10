@@ -41,8 +41,5 @@
     "@types/nodemailer": "^8.0.2",
     "prisma": "^6.4.1",
     "typescript": "^7.0.2"
-  },
-  "prisma": {
-    "schema": "prisma/schema"
   }
 }

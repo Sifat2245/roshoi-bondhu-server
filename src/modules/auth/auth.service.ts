@@ -4,7 +4,7 @@ import tokenUtils from '../../shared/utils/token.js';
 import jwtUtils from '../../shared/utils/jwt.js';
 import cookieUtils from '../../shared/utils/cookie.js';
 import { envVariables } from '../../config/env.js';
-import { AppError, UnauthorizedError, ValidationError, ForbiddenError } from '../../shared/errors/app-error.js';
+import { AppError, UnauthorizedError, ValidationError, ForbiddenError, NotFoundError } from '../../shared/errors/app-error.js';
 import type { Request, Response } from 'express';
 import crypto from 'crypto';
 
@@ -308,6 +308,9 @@ const login = async (data: LoginInput, res: Response) => {
       email: true,
       emailVerified: true,
       role: true,
+      status: true,
+      deletedAt: true,
+      deactivatedUntil: true,
       image: true,
       bio: true,
       coverImage: true,
@@ -319,6 +322,10 @@ const login = async (data: LoginInput, res: Response) => {
 
   if (!user) {
     throw new UnauthorizedError('Invalid email or password.');
+  }
+
+  if (user.status === 'DELETED') {
+    throw new ForbiddenError('This account has been deleted and can no longer be accessed.');
   }
 
   if (user.isBanned) {
@@ -382,6 +389,19 @@ const login = async (data: LoginInput, res: Response) => {
 
   const sessionToken = signInData?.session?.token || crypto.randomUUID();
 
+  // Reactivate account if it was deactivated
+  let reactivated = false;
+  if (user.status === 'DEACTIVATED') {
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        status: 'ACTIVE',
+        deactivatedUntil: null,
+      },
+    });
+    reactivated = true;
+  }
+
   // Generate non-expiring JWT token
   const token = tokenUtils.generateUserToken({
     id: user.id,
@@ -396,8 +416,12 @@ const login = async (data: LoginInput, res: Response) => {
 
   return {
     success: true,
-    message: 'Logged in successfully.',
-    user,
+    message: reactivated ? 'Welcome back! Your account has been reactivated.' : 'Logged in successfully.',
+    user: {
+      ...user,
+      status: 'ACTIVE',
+      deactivatedUntil: null,
+    },
     token,
     session: signInData?.session || {
       token: sessionToken,
@@ -472,6 +496,9 @@ const getMe = async (userId: string) => {
       coverImage: true,
       phone: true,
       role: true,
+      status: true,
+      deletedAt: true,
+      deactivatedUntil: true,
       isBanned: true,
       createdAt: true,
       _count: {
@@ -498,6 +525,288 @@ const getMe = async (userId: string) => {
   };
 };
 
+const changePassword = async (
+  userId: string,
+  data: { currentPassword?: string; newPassword?: string }
+) => {
+  const { currentPassword, newPassword } = data;
+  if (!currentPassword || !newPassword) {
+    throw new ValidationError('Current password and new password are required.');
+  }
+  if (newPassword.length < 6) {
+    throw new ValidationError('New password must be at least 6 characters long.');
+  }
+
+  const account = await prisma.account.findFirst({
+    where: { userId, providerId: 'credential' },
+  });
+
+  if (!account || !account.password) {
+    throw new ValidationError('No password-based credential account found for this user.');
+  }
+
+  const { verifyPassword, hashPassword } = await import('better-auth/crypto');
+  const isMatch = await verifyPassword({
+    hash: account.password,
+    password: currentPassword,
+  });
+
+  if (!isMatch) {
+    throw new ValidationError('Current password does not match.');
+  }
+
+  const hashedPassword = await hashPassword(newPassword);
+
+  await prisma.account.update({
+    where: { id: account.id },
+    data: { password: hashedPassword },
+  });
+
+  return {
+    success: true,
+    message: 'Password changed successfully! Please keep your new password safe.',
+  };
+};
+
+function parseUserAgent(ua?: string | null): { device: string; type: 'MOBILE' | 'DESKTOP' } {
+  if (!ua) return { device: 'Web Browser', type: 'DESKTOP' };
+
+  const isMobile = /Mobile|Android|iPhone|iPad|iPod/i.test(ua);
+  let browser = 'Browser';
+  if (/Edg/i.test(ua)) browser = 'Microsoft Edge';
+  else if (/Chrome/i.test(ua)) browser = 'Google Chrome';
+  else if (/Firefox/i.test(ua)) browser = 'Mozilla Firefox';
+  else if (/Safari/i.test(ua)) browser = 'Apple Safari';
+
+  let os = '';
+  if (/Windows/i.test(ua)) os = 'Windows';
+  else if (/Macintosh|Mac OS/i.test(ua)) os = 'macOS';
+  else if (/iPhone/i.test(ua)) os = 'iPhone';
+  else if (/iPad/i.test(ua)) os = 'iPad';
+  else if (/Android/i.test(ua)) os = 'Android';
+  else if (/Linux/i.test(ua)) os = 'Linux';
+
+  const device = os ? `${browser} on ${os}` : browser;
+  return { device, type: isMobile ? 'MOBILE' : 'DESKTOP' };
+}
+
+function formatRelativeTime(date: Date): string {
+  const diffMs = Date.now() - new Date(date).getTime();
+  const diffSec = Math.floor(diffMs / 1000);
+  const diffMin = Math.floor(diffSec / 60);
+  const diffHour = Math.floor(diffMin / 60);
+  const diffDay = Math.floor(diffHour / 24);
+
+  if (diffSec < 60) return 'Just now';
+  if (diffMin < 60) return `${diffMin}m ago`;
+  if (diffHour < 24) return `${diffHour}h ago`;
+  if (diffDay < 7) return `${diffDay}d ago`;
+  return new Date(date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+const getSessions = async (userId: string, currentToken?: string) => {
+  const sessions = await prisma.session.findMany({
+    where: { userId },
+    orderBy: { updatedAt: 'desc' },
+  });
+
+  if (!sessions.length) {
+    return [
+      {
+        id: 'current-session',
+        device: 'Current Web Browser',
+        type: 'DESKTOP',
+        ipAddress: '127.0.0.1',
+        location: 'Dhaka, Bangladesh',
+        lastActive: 'Active now',
+        activeNow: true,
+      },
+    ];
+  }
+
+  return sessions.map((s, index) => {
+    const isCurrent = currentToken ? s.token === currentToken : index === 0;
+    const parsed = parseUserAgent(s.userAgent);
+    return {
+      id: s.id,
+      device: parsed.device,
+      type: parsed.type,
+      ipAddress: s.ipAddress || '127.0.0.1',
+      location: 'Dhaka, Bangladesh',
+      lastActive: isCurrent ? 'Active now' : `Active ${formatRelativeTime(s.updatedAt || s.createdAt)}`,
+      createdAt: s.createdAt,
+      updatedAt: s.updatedAt,
+      expiresAt: s.expiresAt,
+      activeNow: isCurrent,
+    };
+  });
+};
+
+const revokeSession = async (userId: string, sessionId: string, currentToken?: string) => {
+  const session = await prisma.session.findUnique({
+    where: { id: sessionId },
+  });
+
+  if (!session || session.userId !== userId) {
+    throw new NotFoundError('Session not found or already signed out.');
+  }
+
+  await prisma.session.delete({
+    where: { id: sessionId },
+  });
+
+  const isCurrentSession = currentToken ? session.token === currentToken : false;
+
+  return {
+    success: true,
+    isCurrentSession,
+    message: isCurrentSession
+      ? 'Current session revoked. You have been signed out.'
+      : 'Device session revoked successfully.',
+  };
+};
+
+const revokeOtherSessions = async (userId: string, currentToken?: string) => {
+  if (currentToken) {
+    await prisma.session.deleteMany({
+      where: {
+        userId,
+        NOT: { token: currentToken },
+      },
+    });
+  } else {
+    const latest = await prisma.session.findFirst({
+      where: { userId },
+      orderBy: { updatedAt: 'desc' },
+    });
+    if (latest) {
+      await prisma.session.deleteMany({
+        where: {
+          userId,
+          NOT: { id: latest.id },
+        },
+      });
+    }
+  }
+
+  return {
+    success: true,
+    message: 'Logged out of all other sessions successfully.',
+  };
+};
+
+const deactivateAccount = async (
+  userId: string,
+  data: { password?: string; durationDays?: number | null },
+  res?: Response,
+  req?: Request
+) => {
+  const { password, durationDays } = data;
+  if (!password) {
+    throw new ValidationError('Password is required to confirm account deactivation.');
+  }
+
+  const account = await prisma.account.findFirst({
+    where: { userId, providerId: 'credential' },
+  });
+
+  if (!account || !account.password) {
+    throw new ValidationError('No password-based credential account found for this user.');
+  }
+
+  const { verifyPassword } = await import('better-auth/crypto');
+  const isMatch = await verifyPassword({
+    hash: account.password,
+    password,
+  });
+
+  if (!isMatch) {
+    throw new UnauthorizedError('Incorrect password. Please verify your current password.');
+  }
+
+  const deactivatedUntil =
+    durationDays && durationDays > 0
+      ? new Date(Date.now() + durationDays * 24 * 60 * 60 * 1000)
+      : null;
+
+  await prisma.user.update({
+    where: { id: userId },
+    data: {
+      status: 'DEACTIVATED',
+      deactivatedUntil,
+    },
+  });
+
+  // Revoke all active sessions for this user
+  await prisma.session.deleteMany({
+    where: { userId },
+  });
+
+  if (res) {
+    tokenUtils.clearAuthCookies(res, req);
+  }
+
+  return {
+    success: true,
+    message: deactivatedUntil
+      ? `Your account has been deactivated for ${durationDays} days. Logging in will reactivate it.`
+      : 'Your account has been deactivated. Logging in anytime will reactivate it.',
+  };
+};
+
+const deleteAccount = async (
+  userId: string,
+  data: { password?: string },
+  res?: Response,
+  req?: Request
+) => {
+  const { password } = data;
+  if (!password) {
+    throw new ValidationError('Password is required to confirm account deletion.');
+  }
+
+  const account = await prisma.account.findFirst({
+    where: { userId, providerId: 'credential' },
+  });
+
+  if (!account || !account.password) {
+    throw new ValidationError('No password-based credential account found for this user.');
+  }
+
+  const { verifyPassword } = await import('better-auth/crypto');
+  const isMatch = await verifyPassword({
+    hash: account.password,
+    password,
+  });
+
+  if (!isMatch) {
+    throw new UnauthorizedError('Incorrect password. Please verify your current password.');
+  }
+
+  // Soft delete: keep row and relations, mark status as DELETED, record deletedAt
+  await prisma.user.update({
+    where: { id: userId },
+    data: {
+      status: 'DELETED',
+      deletedAt: new Date(),
+    },
+  });
+
+  // Revoke all active sessions immediately
+  await prisma.session.deleteMany({
+    where: { userId },
+  });
+
+  if (res) {
+    tokenUtils.clearAuthCookies(res, req);
+  }
+
+  return {
+    success: true,
+    message: 'Your account has been deleted. You will no longer be able to log in.',
+  };
+};
+
 export const AuthService = {
   signup,
   verifyOTP,
@@ -507,6 +816,12 @@ export const AuthService = {
   login,
   logout,
   getMe,
+  changePassword,
+  getSessions,
+  revokeSession,
+  revokeOtherSessions,
+  deactivateAccount,
+  deleteAccount,
 };
 
 export default AuthService;

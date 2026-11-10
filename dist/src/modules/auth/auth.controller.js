@@ -81,6 +81,61 @@ const getMe = CatchAsync(async (req, res) => {
         data: result,
     });
 });
+const changePassword = CatchAsync(async (req, res) => {
+    const result = await AuthService.changePassword(req.user.id, req.body);
+    sendResponse(res, {
+        statusCode: 200,
+        success: true,
+        message: result.message,
+        data: result,
+    });
+});
+const getSessions = CatchAsync(async (req, res) => {
+    const result = await AuthService.getSessions(req.user.id, req.session?.token);
+    sendResponse(res, {
+        statusCode: 200,
+        success: true,
+        message: 'Active sessions retrieved successfully.',
+        data: result,
+    });
+});
+const revokeSession = CatchAsync(async (req, res) => {
+    const sessionId = req.params.sessionId;
+    const result = await AuthService.revokeSession(req.user.id, sessionId, req.session?.token);
+    sendResponse(res, {
+        statusCode: 200,
+        success: true,
+        message: result.message,
+        data: result,
+    });
+});
+const revokeOtherSessions = CatchAsync(async (req, res) => {
+    const result = await AuthService.revokeOtherSessions(req.user.id, req.session?.token);
+    sendResponse(res, {
+        statusCode: 200,
+        success: true,
+        message: result.message,
+        data: result,
+    });
+});
+const deactivateAccount = CatchAsync(async (req, res) => {
+    const result = await AuthService.deactivateAccount(req.user.id, req.body, res, req);
+    sendResponse(res, {
+        statusCode: 200,
+        success: true,
+        message: result.message,
+        data: result,
+    });
+});
+const deleteAccount = CatchAsync(async (req, res) => {
+    const result = await AuthService.deleteAccount(req.user.id, req.body, res, req);
+    sendResponse(res, {
+        statusCode: 200,
+        success: true,
+        message: result.message,
+        data: result,
+    });
+});
 export const AuthController = {
     signup,
     verifyOTP,
@@ -90,5 +145,11 @@ export const AuthController = {
     login,
     logout,
     getMe,
+    changePassword,
+    getSessions,
+    revokeSession,
+    revokeOtherSessions,
+    deactivateAccount,
+    deleteAccount,
 };
 export default AuthController;

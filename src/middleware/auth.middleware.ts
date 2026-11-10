@@ -1,4 +1,5 @@
 import type { Request, Response, NextFunction } from 'express';
+import { fromNodeHeaders } from 'better-auth/node';
 import auth from '../lib/auth.js';
 import prisma from '../lib/prisma.js';
 import jwtUtils from '../shared/utils/jwt.js';
@@ -48,13 +49,16 @@ const resolveUserFromHeaders = async (req: Request): Promise<AuthenticatedUser |
             email: true,
             image: true,
             role: true,
+            status: true,
             isBanned: true,
             bio: true,
             coverImage: true,
             phone: true,
           },
         });
-        if (user) return user as AuthenticatedUser;
+        if (user && user.status !== 'DELETED' && !user.isBanned) {
+          return user as AuthenticatedUser;
+        }
       }
     } catch {
       // Token invalid or expired, fallback to session
@@ -64,7 +68,7 @@ const resolveUserFromHeaders = async (req: Request): Promise<AuthenticatedUser |
   // 3. Try Better Auth Session from Cookie / Headers
   try {
     const session = await auth.api.getSession({
-      headers: req.headers as any,
+      headers: fromNodeHeaders(req.headers),
     });
     if (session && session.user) {
       const user = await prisma.user.findUnique({
@@ -75,13 +79,14 @@ const resolveUserFromHeaders = async (req: Request): Promise<AuthenticatedUser |
           email: true,
           image: true,
           role: true,
+          status: true,
           isBanned: true,
           bio: true,
           coverImage: true,
           phone: true,
         },
       });
-      if (user) {
+      if (user && user.status !== 'DELETED' && !user.isBanned) {
         req.session = session.session;
         return user as AuthenticatedUser;
       }

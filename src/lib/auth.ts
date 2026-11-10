@@ -49,17 +49,20 @@ export const auth = betterAuth({
             },
             handler: async (c: any) => {
               const isProd = env.NODE_ENV === 'production';
-              const clearOptions = {
-                path: '/',
-                maxAge: 0,
-                httpOnly: true,
-                secure: isProd,
-                sameSite: isProd ? ('none' as const) : ('lax' as const),
+              const clearCookie = (name: string) => {
+                const cookieStr = `${name}=; Path=/; Max-Age=0; HttpOnly; SameSite=${isProd ? 'None; Secure' : 'Lax'}`;
+                if (typeof c.setCookie === 'function') {
+                  try {
+                    c.setCookie(name, '', { path: '/', maxAge: 0, httpOnly: true, secure: isProd });
+                  } catch {}
+                } else if (c.responseHeaders?.append) {
+                  c.responseHeaders.append('Set-Cookie', cookieStr);
+                }
               };
-              c.setCookie('accessToken', '', clearOptions);
-              c.setCookie('refreshToken', '', clearOptions);
-              c.setCookie('betterAuthSession', '', clearOptions);
-              c.setCookie('heshel.session_token', '', clearOptions);
+              clearCookie('accessToken');
+              clearCookie('refreshToken');
+              clearCookie('betterAuthSession');
+              clearCookie('heshel.session_token');
             },
           },
         ],

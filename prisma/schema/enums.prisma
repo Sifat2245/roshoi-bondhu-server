@@ -4,6 +4,13 @@ enum PlatformRole {
   ADMIN
 }
 
+enum UserStatus {
+  ACTIVE
+  DEACTIVATED
+  DELETED
+  SUSPENDED
+}
+
 enum GroupRole {
   ADMIN
   MODERATOR
