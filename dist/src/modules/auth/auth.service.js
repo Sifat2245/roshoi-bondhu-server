@@ -419,6 +419,8 @@ const getMe = async (userId) => {
             deactivatedUntil: true,
             isBanned: true,
             createdAt: true,
+            profile: true,
+            preferences: true,
             _count: {
                 select: {
                     posts: { where: { status: 'PUBLISHED' } },
@@ -432,8 +434,40 @@ const getMe = async (userId) => {
     if (!user) {
         throw new UnauthorizedError('User account not found.');
     }
+    let profile = user.profile;
+    if (!profile) {
+        try {
+            const defaultUsername = user.email.split('@')[0].toLowerCase().replace(/[^a-z0-9_]/g, '_');
+            profile = await prisma.userProfile.create({
+                data: {
+                    userId: user.id,
+                    username: defaultUsername,
+                    bio: user.bio || '',
+                    phone: user.phone || null,
+                },
+            });
+        }
+        catch {
+            profile = null;
+        }
+    }
     return {
         ...user,
+        username: profile?.username || user.email.split('@')[0],
+        city: profile?.city || profile?.hometown || '',
+        work: profile?.work || '',
+        education: profile?.education || '',
+        gender: profile?.gender || '',
+        birthDate: profile?.birthDate || null,
+        hometown: profile?.hometown || profile?.city || '',
+        languages: profile?.languages || '',
+        expertise: profile?.expertise || '',
+        hobbies: profile?.hobbies || '',
+        interests: profile?.interests || '',
+        website: profile?.website || '',
+        socialLinks: profile?.socialLinks || '',
+        contactVisibility: profile?.contactVisibility || 'PUBLIC',
+        birthdayVisibility: profile?.birthdayVisibility || 'FRIENDS',
         postsCount: user._count.posts,
         followersCount: user._count.followers,
         followingCount: user._count.following,

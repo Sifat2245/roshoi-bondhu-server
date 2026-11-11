@@ -61,7 +61,35 @@ const resolveUserFromHeaders = async (req: Request): Promise<AuthenticatedUser |
         }
       }
     } catch {
-      // Token invalid or expired, fallback to session
+      // Not a JWT, check if it's a Better Auth session token in the Session table
+      try {
+        const dbSession = await prisma.session.findUnique({
+          where: { token },
+        });
+        if (dbSession && new Date(dbSession.expiresAt) > new Date()) {
+          const user = await prisma.user.findUnique({
+            where: { id: dbSession.userId },
+            select: {
+              id: true,
+              name: true,
+              email: true,
+              image: true,
+              role: true,
+              status: true,
+              isBanned: true,
+              bio: true,
+              coverImage: true,
+              phone: true,
+            },
+          });
+          if (user && user.status !== 'DELETED' && !user.isBanned) {
+            req.session = dbSession;
+            return user as AuthenticatedUser;
+          }
+        }
+      } catch {
+        // Fallback to session check below
+      }
     }
   }
 

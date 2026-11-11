@@ -1,6 +1,6 @@
 import { betterAuth } from 'better-auth';
 import { prismaAdapter } from 'better-auth/adapters/prisma';
-import { emailOTP } from 'better-auth/plugins';
+import { emailOTP, bearer } from 'better-auth/plugins';
 import prisma from './prisma.js';
 import { env } from '../config/env.js';
 import EmailService from '../shared/services/email.service.js';
@@ -30,6 +30,7 @@ export const auth = betterAuth({
         cookiePrefix: 'heshel',
     },
     plugins: [
+        bearer(),
         emailOTP({
             expiresIn: 600, // 10 minutes (600 seconds)
             sendVerificationOnSignUp: true,

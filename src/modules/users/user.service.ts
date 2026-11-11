@@ -118,7 +118,7 @@ const getUserProfile = async (targetUserIdOrSlug: string, currentUserId?: string
     image: user.image,
     coverImage: user.coverImage,
     bio: profile?.bio || user.bio || '',
-    city: profile?.city || '',
+    city: profile?.city || profile?.hometown || '',
     work: profile?.work || '',
     education: profile?.education || '',
     phone: isMe || canSeeContact ? (profile?.phone || user.phone || '') : '',
