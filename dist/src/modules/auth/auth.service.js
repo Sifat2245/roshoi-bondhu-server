@@ -106,6 +106,13 @@ const verifyOTP = async (data, res) => {
             coverImage: true,
             phone: true,
             isBanned: true,
+            twoFactorEnabled: true,
+            emailOtpEnabled: true,
+            totpEnabled: true,
+            twoFactors: {
+                where: { verified: true },
+                select: { id: true },
+            },
             createdAt: true,
         },
     });
@@ -252,6 +259,13 @@ const login = async (data, res) => {
             coverImage: true,
             phone: true,
             isBanned: true,
+            twoFactorEnabled: true,
+            emailOtpEnabled: true,
+            totpEnabled: true,
+            twoFactors: {
+                where: { verified: true },
+                select: { id: true },
+            },
             createdAt: true,
         },
     });
@@ -317,6 +331,32 @@ const login = async (data, res) => {
         signInData = await signInResponse.json();
     }
     catch { }
+    const hasTotp = Boolean(user.totpEnabled || (user.twoFactors && user.twoFactors.length > 0));
+    const hasEmail = Boolean(user.emailOtpEnabled);
+    const is2FA = Boolean(user.twoFactorEnabled) && (hasTotp || hasEmail);
+    // If two factor authentication is required, return challenge response immediately
+    if (signInData?.twoFactorRedirect || user.twoFactorEnabled || is2FA) {
+        const methods = [];
+        if (hasTotp)
+            methods.push('totp');
+        if (hasEmail)
+            methods.push('otp');
+        if (methods.length === 0) {
+            if (signInData?.twoFactorMethods?.length) {
+                methods.push(...signInData.twoFactorMethods);
+            }
+            else {
+                methods.push('otp');
+            }
+        }
+        return {
+            success: true,
+            twoFactorRedirect: true,
+            twoFactorMethods: methods,
+            email: user.email,
+            message: 'Two-factor authentication required. Please enter your 6-digit verification code.',
+        };
+    }
     const sessionToken = signInData?.session?.token || crypto.randomUUID();
     // Reactivate account if it was deactivated
     let reactivated = false;
@@ -418,6 +458,13 @@ const getMe = async (userId) => {
             deletedAt: true,
             deactivatedUntil: true,
             isBanned: true,
+            twoFactorEnabled: true,
+            emailOtpEnabled: true,
+            totpEnabled: true,
+            twoFactors: {
+                where: { verified: true },
+                select: { id: true },
+            },
             createdAt: true,
             profile: true,
             preferences: true,
@@ -468,6 +515,9 @@ const getMe = async (userId) => {
         socialLinks: profile?.socialLinks || '',
         contactVisibility: profile?.contactVisibility || 'PUBLIC',
         birthdayVisibility: profile?.birthdayVisibility || 'FRIENDS',
+        twoFactorEnabled: Boolean(user.twoFactorEnabled),
+        emailOtpEnabled: Boolean(user.emailOtpEnabled),
+        totpEnabled: Boolean(user.totpEnabled),
         postsCount: user._count.posts,
         followersCount: user._count.followers,
         followingCount: user._count.following,
@@ -715,6 +765,179 @@ const deleteAccount = async (userId, data, res, req) => {
         message: 'Your account has been deleted. You will no longer be able to log in.',
     };
 };
+const verifyUserPassword = async (userId, passwordInput) => {
+    if (!passwordInput)
+        throw new ValidationError('Password is required.');
+    const account = await prisma.account.findFirst({
+        where: { userId, providerId: 'credential' },
+    });
+    if (!account || !account.password) {
+        throw new ValidationError('No password-based credential account found for this user.');
+    }
+    const { verifyPassword } = await import('better-auth/crypto');
+    const isMatch = await verifyPassword({
+        hash: account.password,
+        password: passwordInput,
+    });
+    if (!isMatch) {
+        throw new ValidationError('Current password does not match.');
+    }
+};
+const getTwoFactorStatus = async (userId) => {
+    const user = await prisma.user.findUnique({
+        where: { id: userId },
+        select: {
+            twoFactorEnabled: true,
+            emailOtpEnabled: true,
+            totpEnabled: true,
+            twoFactors: {
+                where: { verified: true },
+                select: { id: true, createdAt: true },
+            },
+        },
+    });
+    if (!user)
+        throw new NotFoundError('User not found.');
+    const hasVerifiedTotp = Boolean(user.twoFactors && user.twoFactors.length > 0);
+    const totpActive = Boolean(user.totpEnabled) || hasVerifiedTotp;
+    const emailActive = Boolean(user.emailOtpEnabled);
+    const twoFactorActive = Boolean(user.twoFactorEnabled) && (emailActive || totpActive);
+    if (hasVerifiedTotp && !user.totpEnabled) {
+        await prisma.user.update({
+            where: { id: userId },
+            data: { totpEnabled: true },
+        }).catch(() => { });
+    }
+    return {
+        twoFactorEnabled: twoFactorActive,
+        emailOtpEnabled: emailActive,
+        totpEnabled: totpActive,
+    };
+};
+const confirmTotp = async (userId) => {
+    await prisma.user.update({
+        where: { id: userId },
+        data: {
+            totpEnabled: true,
+            twoFactorEnabled: true,
+        },
+    });
+    await prisma.userPreference.upsert({
+        where: { userId },
+        create: { userId, twoFactorEnabled: true },
+        update: { twoFactorEnabled: true },
+    }).catch(() => { });
+    return {
+        success: true,
+        twoFactorEnabled: true,
+        totpEnabled: true,
+        message: 'Authenticator App (TOTP) successfully activated.',
+    };
+};
+const enableEmailOtp = async (userId, passwordInput) => {
+    await verifyUserPassword(userId, passwordInput);
+    await prisma.user.update({
+        where: { id: userId },
+        data: {
+            emailOtpEnabled: true,
+            twoFactorEnabled: true,
+        },
+    });
+    await prisma.userPreference.upsert({
+        where: { userId },
+        create: { userId, twoFactorEnabled: true },
+        update: { twoFactorEnabled: true },
+    }).catch(() => { });
+    return {
+        success: true,
+        twoFactorEnabled: true,
+        emailOtpEnabled: true,
+        message: 'Email OTP Two-Factor Authentication enabled.',
+    };
+};
+const disableEmailOtp = async (userId, passwordInput) => {
+    await verifyUserPassword(userId, passwordInput);
+    const user = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { totpEnabled: true, twoFactors: { where: { verified: true } } },
+    });
+    const remainingTotp = Boolean(user?.totpEnabled || (user?.twoFactors && user.twoFactors.length > 0));
+    await prisma.user.update({
+        where: { id: userId },
+        data: {
+            emailOtpEnabled: false,
+            twoFactorEnabled: remainingTotp,
+        },
+    });
+    await prisma.userPreference.upsert({
+        where: { userId },
+        create: { userId, twoFactorEnabled: remainingTotp },
+        update: { twoFactorEnabled: remainingTotp },
+    }).catch(() => { });
+    return {
+        success: true,
+        twoFactorEnabled: remainingTotp,
+        emailOtpEnabled: false,
+        totpEnabled: remainingTotp,
+        message: 'Email OTP Two-Factor Authentication disabled.',
+    };
+};
+const disableTotp = async (userId, passwordInput) => {
+    await verifyUserPassword(userId, passwordInput);
+    const user = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { emailOtpEnabled: true },
+    });
+    const remainingEmail = Boolean(user?.emailOtpEnabled);
+    await prisma.twoFactor.deleteMany({
+        where: { userId },
+    });
+    await prisma.user.update({
+        where: { id: userId },
+        data: {
+            totpEnabled: false,
+            twoFactorEnabled: remainingEmail,
+        },
+    });
+    await prisma.userPreference.upsert({
+        where: { userId },
+        create: { userId, twoFactorEnabled: remainingEmail },
+        update: { twoFactorEnabled: remainingEmail },
+    }).catch(() => { });
+    return {
+        success: true,
+        twoFactorEnabled: remainingEmail,
+        totpEnabled: false,
+        emailOtpEnabled: remainingEmail,
+        message: 'Authenticator App (TOTP) two-factor authentication removed.',
+    };
+};
+const disableAllTwoFactor = async (userId, passwordInput) => {
+    await verifyUserPassword(userId, passwordInput);
+    await prisma.twoFactor.deleteMany({
+        where: { userId },
+    });
+    await prisma.user.update({
+        where: { id: userId },
+        data: {
+            emailOtpEnabled: false,
+            totpEnabled: false,
+            twoFactorEnabled: false,
+        },
+    });
+    await prisma.userPreference.upsert({
+        where: { userId },
+        create: { userId, twoFactorEnabled: false },
+        update: { twoFactorEnabled: false },
+    }).catch(() => { });
+    return {
+        success: true,
+        twoFactorEnabled: false,
+        emailOtpEnabled: false,
+        totpEnabled: false,
+        message: 'Two-factor authentication has been completely turned off.',
+    };
+};
 export const AuthService = {
     signup,
     verifyOTP,
@@ -730,5 +953,11 @@ export const AuthService = {
     revokeOtherSessions,
     deactivateAccount,
     deleteAccount,
+    getTwoFactorStatus,
+    confirmTotp,
+    enableEmailOtp,
+    disableEmailOtp,
+    disableTotp,
+    disableAllTwoFactor,
 };
 export default AuthService;

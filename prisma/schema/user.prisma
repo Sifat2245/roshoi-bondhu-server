@@ -12,12 +12,17 @@ model User {
   deletedAt        DateTime?
   deactivatedUntil DateTime?
   isBanned         Boolean       @default(false)
+  twoFactorEnabled Boolean?      @default(false)
+  emailOtpEnabled  Boolean?      @default(false)
+  totpEnabled      Boolean?      @default(false)
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
 
   // Better Auth
   sessions      Session[]
   accounts      Account[]
+  twoFactors    TwoFactor[]
+  passkeys      Passkey[]
 
   // Relations
   posts         Post[]
@@ -84,4 +89,39 @@ model Follow {
 
   @@unique([followerId, followingId])
 }
+
+model TwoFactor {
+  id                      String    @id @default(cuid())
+  secret                  String
+  backupCodes             String
+  userId                  String
+  user                    User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  verified                Boolean   @default(true)
+  failedVerificationCount Int       @default(0)
+  lockedUntil             DateTime?
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
+
+  @@index([secret])
+  @@index([userId])
+}
+
+model Passkey {
+  id           String    @id @default(cuid())
+  name         String?
+  publicKey    String
+  userId       String
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  credentialID String    @unique
+  counter      Int
+  deviceType   String
+  backedUp     Boolean
+  transports   String?
+  createdAt    DateTime? @default(now())
+  aaguid       String?
+
+  @@index([userId])
+  @@index([credentialID])
+}
+
 

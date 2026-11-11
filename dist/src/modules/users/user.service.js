@@ -102,6 +102,9 @@ const getUserProfile = async (targetUserIdOrSlug, currentUserId) => {
         _count: user._count,
         isFollowing,
         isMe,
+        twoFactorEnabled: isMe ? Boolean(user.twoFactorEnabled) : false,
+        emailOtpEnabled: isMe ? Boolean(user.emailOtpEnabled) : false,
+        totpEnabled: isMe ? Boolean(user.totpEnabled) : false,
         preferences: isMe ? user.preferences : null,
     };
 };

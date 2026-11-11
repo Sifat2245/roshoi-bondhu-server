@@ -1,6 +1,7 @@
 import { betterAuth } from 'better-auth';
 import { prismaAdapter } from 'better-auth/adapters/prisma';
-import { emailOTP, bearer } from 'better-auth/plugins';
+import { emailOTP, bearer, twoFactor } from 'better-auth/plugins';
+import { passkey } from '@better-auth/passkey';
 import prisma from './prisma.js';
 import { env } from '../config/env.js';
 import EmailService from '../shared/services/email.service.js';
@@ -32,6 +33,24 @@ export const auth = betterAuth({
   },
   plugins: [
     bearer(),
+    passkey({
+      rpName: 'Heshel',
+      rpID: env.NODE_ENV === 'production' ? new URL(env.CLIENT_URL).hostname : 'localhost',
+      origin: [
+        env.CLIENT_URL,
+        'http://localhost:5173',
+        'http://localhost:5174',
+        'http://localhost:3000',
+      ],
+    }),
+    twoFactor({
+      issuer: 'Heshel',
+      otpOptions: {
+        async sendOTP({ user, otp }) {
+          await EmailService.sendTwoFactorOtpEmail(user.email, otp);
+        },
+      },
+    }),
     emailOTP({
       expiresIn: 600, // 10 minutes (600 seconds)
       sendVerificationOnSignUp: true,

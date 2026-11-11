@@ -183,12 +183,39 @@ export const EmailService = {
   },
 
   /**
+   * Send Two-Factor Authentication OTP
+   */
+  async sendTwoFactorOtpEmail(email: string, otp: string): Promise<boolean> {
+    const title = 'টু-ফ্যাক্টর নিরাপত্তা কোড (2FA Code)';
+    const html = buildEmailHtml({
+      title,
+      badge: 'Two-Factor Verification Code',
+      greeting: 'হ্যালো,',
+      instruction:
+        'আপনার হেঁশেল একাউন্টে সাইন-ইন সম্পন্ন করতে নিচের ৬ ডিজিটের টু-ফ্যাক্টর নিরাপত্তা কোডটি ব্যবহার করুন:',
+      otp,
+      note: 'এই কোডটি কারো সাথে শেয়ার করবেন না। আপনি যদি সাইন-ইন করার চেষ্টা না করে থাকেন, তবে অবিলম্বে আপনার পাসওয়ার্ড পরিবর্তন করুন।',
+    });
+
+    return EmailService.sendRawEmail({
+      to: email,
+      subject: `[Heshel] ${otp} হলো আপনার টু-ফ্যাক্টর নিরাপত্তা কোড (2FA Security Code)`,
+      html,
+      logLabel: 'TWO-FACTOR OTP',
+      otp,
+    });
+  },
+
+  /**
    * Unified dispatcher for Better Auth emailOTP plugin
    */
   async sendOtpEmail(options: { email: string; otp: string; type: string }): Promise<boolean> {
     const { email, otp, type } = options;
     if (type === 'forget-password') {
       return EmailService.sendPasswordResetEmail(email, otp);
+    }
+    if (type === 'two-factor') {
+      return EmailService.sendTwoFactorOtpEmail(email, otp);
     }
     return EmailService.sendVerificationEmail(email, otp);
   },

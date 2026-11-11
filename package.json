@@ -16,6 +16,7 @@
   "license": "ISC",
   "description": "Backend API for Hesheli Recipe Social Media Platform",
   "dependencies": {
+    "@better-auth/passkey": "^1.7.20",
     "@prisma/client": "^6.4.1",
     "better-auth": "^1.1.21",
     "cloudinary": "^2.5.1",
@@ -32,6 +33,7 @@
     "tsx": "^4.23.15"
   },
   "devDependencies": {
+    "@better-auth/cli": "^1.4.22",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
     "@types/jsonwebtoken": "^9.0.10",

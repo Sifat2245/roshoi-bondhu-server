@@ -152,6 +152,66 @@ const deleteAccount = CatchAsync(async (req: Request, res: Response) => {
   });
 });
 
+const getTwoFactorStatus = CatchAsync(async (req: Request, res: Response) => {
+  const result = await AuthService.getTwoFactorStatus(req.user!.id);
+  sendResponse(res, {
+    statusCode: 200,
+    success: true,
+    message: 'Two-factor status retrieved successfully.',
+    data: result,
+  });
+});
+
+const enableEmailOtp = CatchAsync(async (req: Request, res: Response) => {
+  const result = await AuthService.enableEmailOtp(req.user!.id, req.body.password);
+  sendResponse(res, {
+    statusCode: 200,
+    success: true,
+    message: result.message,
+    data: result,
+  });
+});
+
+const disableEmailOtp = CatchAsync(async (req: Request, res: Response) => {
+  const result = await AuthService.disableEmailOtp(req.user!.id, req.body.password);
+  sendResponse(res, {
+    statusCode: 200,
+    success: true,
+    message: result.message,
+    data: result,
+  });
+});
+
+const disableTotp = CatchAsync(async (req: Request, res: Response) => {
+  const result = await AuthService.disableTotp(req.user!.id, req.body.password);
+  sendResponse(res, {
+    statusCode: 200,
+    success: true,
+    message: result.message,
+    data: result,
+  });
+});
+
+const confirmTotp = CatchAsync(async (req: Request, res: Response) => {
+  const result = await AuthService.confirmTotp(req.user!.id);
+  sendResponse(res, {
+    statusCode: 200,
+    success: true,
+    message: result.message,
+    data: result,
+  });
+});
+
+const disableAllTwoFactor = CatchAsync(async (req: Request, res: Response) => {
+  const result = await AuthService.disableAllTwoFactor(req.user!.id, req.body.password);
+  sendResponse(res, {
+    statusCode: 200,
+    success: true,
+    message: result.message,
+    data: result,
+  });
+});
+
 export const AuthController = {
   signup,
   verifyOTP,
@@ -167,6 +227,12 @@ export const AuthController = {
   revokeOtherSessions,
   deactivateAccount,
   deleteAccount,
+  getTwoFactorStatus,
+  confirmTotp,
+  enableEmailOtp,
+  disableEmailOtp,
+  disableTotp,
+  disableAllTwoFactor,
 };
 
 export default AuthController;

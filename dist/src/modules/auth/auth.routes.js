@@ -22,5 +22,12 @@ router.delete('/sessions', requireAuth, AuthController.revokeOtherSessions);
 router.post('/deactivate', requireAuth, AuthController.deactivateAccount);
 router.post('/delete-account', requireAuth, AuthController.deleteAccount);
 router.post('/delete', requireAuth, AuthController.deleteAccount); // Alias
+// Two-Factor Authentication Management
+router.get('/two-factor/status', requireAuth, AuthController.getTwoFactorStatus);
+router.post('/two-factor/confirm-totp', requireAuth, AuthController.confirmTotp);
+router.post('/two-factor/enable-otp', requireAuth, AuthController.enableEmailOtp);
+router.post('/two-factor/disable-otp', requireAuth, AuthController.disableEmailOtp);
+router.post('/two-factor/disable-totp', requireAuth, AuthController.disableTotp);
+router.post('/two-factor/disable-all', requireAuth, AuthController.disableAllTwoFactor);
 export const authRoutes = router;
 export default authRoutes;
