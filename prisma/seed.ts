@@ -1,6 +1,8 @@
 import prisma from '../src/lib/prisma.js';
 import auth from '../src/lib/auth.js';
 import { hashPassword } from 'better-auth/crypto';
+import { seed100Users } from './seed-100-users.js';
+import { seedFriendships } from './seed-friendships.js';
 
 async function main() {
   console.log('[Seed] Seeding Heshel database in NeonDB...');
@@ -70,7 +72,7 @@ async function main() {
           image: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
         },
       });
-      admin = res.user;
+      admin = await prisma.user.findUnique({ where: { id: res.user.id } });
     } catch (e: any) {
       console.log('[Seed] Admin sign up note:', e.message);
     }
@@ -104,7 +106,7 @@ async function main() {
           image: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150',
         },
       });
-      mod = res.user;
+      mod = await prisma.user.findUnique({ where: { id: res.user.id } });
     } catch (e: any) {
       console.log('[Seed] Moderator sign up note:', e.message);
     }
@@ -122,6 +124,12 @@ async function main() {
     });
     console.log('[Seed] Moderator user verified: moderator@heshel.com');
   }
+
+  // 4. Seed 100 foodies (user1@example.com to user100@example.com)
+  await seed100Users();
+
+  // 5. Seed sample friendships & mutual networks
+  await seedFriendships();
 
   console.log('[Seed] Database users verification and seeding completed successfully!');
 }

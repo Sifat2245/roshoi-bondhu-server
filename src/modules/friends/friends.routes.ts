@@ -1,0 +1,26 @@
+import { Router } from 'express';
+import { FriendsController } from './friends.controller.js';
+import { requireAuth } from '../../middleware/auth.middleware.js';
+
+const router = Router();
+
+// All friends routes require authentication
+router.use(requireAuth);
+
+router.get('/all', FriendsController.getAllFriends);
+router.get('/requests', FriendsController.getFriendRequests);
+router.get('/suggestions', FriendsController.getSuggestions);
+router.get('/blocked', FriendsController.getBlockedUsers);
+router.get('/status/:targetUserId', FriendsController.getRelationshipStatus);
+
+router.post('/request/:targetUserId', FriendsController.sendFriendRequest);
+router.post('/accept/:id', FriendsController.acceptFriendRequest);
+router.post('/decline/:id', FriendsController.declineFriendRequest);
+router.post('/cancel/:targetUserId', FriendsController.cancelFriendRequest);
+router.post('/unfriend/:targetUserId', FriendsController.unfriend);
+router.post('/block/:targetUserId', FriendsController.blockUser);
+router.post('/unblock/:targetUserId', FriendsController.unblockUser);
+
+export const friendsRoutes = router;
+export default friendsRoutes;
+

@@ -27,6 +27,8 @@ const getUserProfile = async (targetUserIdOrSlug, currentUserId) => {
                     followers: true,
                     following: true,
                     createdGroups: true,
+                    friendshipsAsLow: true,
+                    friendshipsAsHigh: true,
                 },
             },
         },
@@ -53,6 +55,18 @@ const getUserProfile = async (targetUserIdOrSlug, currentUserId) => {
     }
     let isFollowing = false;
     if (currentUserId && currentUserId !== user.id) {
+        // Check if either user has blocked the other
+        const isBlocked = await prisma.userBlock.findFirst({
+            where: {
+                OR: [
+                    { blockerId: currentUserId, blockedId: user.id },
+                    { blockerId: user.id, blockedId: currentUserId },
+                ],
+            },
+        });
+        if (isBlocked) {
+            throw new NotFoundError("This content isn't available right now");
+        }
         const follow = await prisma.follow.findUnique({
             where: {
                 followerId_followingId: {
@@ -98,6 +112,7 @@ const getUserProfile = async (targetUserIdOrSlug, currentUserId) => {
         postsCount: user._count.posts,
         followersCount: user._count.followers,
         followingCount: user._count.following,
+        friendsCount: (user._count?.friendshipsAsLow || 0) + (user._count?.friendshipsAsHigh || 0),
         createdGroupsCount: user._count.createdGroups,
         _count: user._count,
         isFollowing,

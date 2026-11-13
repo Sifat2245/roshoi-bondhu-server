@@ -5,6 +5,7 @@ import { groupRoutes } from './modules/groups/group.routes.js';
 import { userRoutes } from './modules/users/user.routes.js';
 import { adminRoutes } from './modules/admin/admin.routes.js';
 import { mediaRoutes } from './modules/media/media.routes.js';
+import { friendsRoutes } from './modules/friends/friends.routes.js';
 const router = Router();
 // Modular application REST routes
 router.use('/auth', authRoutes);
@@ -12,6 +13,8 @@ router.use('/post', postRoutes);
 router.use('/posts', postRoutes);
 router.use('/group', groupRoutes);
 router.use('/groups', groupRoutes);
+router.use('/friends', friendsRoutes);
+router.use('/user/friends', friendsRoutes);
 router.use('/user', userRoutes);
 router.use('/users', userRoutes);
 router.use('/me', userRoutes);

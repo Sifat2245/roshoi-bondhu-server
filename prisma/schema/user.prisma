@@ -39,6 +39,14 @@ model User {
   // Phase 2: Profiles & Preferences
   profile       UserProfile?
   preferences   UserPreference?
+
+  // Phase 3: Friends, Requests & Blocks
+  sentFriendRequests     FriendshipRequest[] @relation("SentFriendRequests")
+  receivedFriendRequests FriendshipRequest[] @relation("ReceivedFriendRequests")
+  friendshipsAsLow       Friendship[]        @relation("FriendshipsLow")
+  friendshipsAsHigh      Friendship[]        @relation("FriendshipsHigh")
+  blocksIssued           UserBlock[]         @relation("BlocksIssued")
+  blocksReceived         UserBlock[]         @relation("BlocksReceived")
 }
 
 model Session {

@@ -40,3 +40,10 @@ enum ReportStatus {
   DISMISSED
 }
 
+enum FriendshipRequestStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+  CANCELLED
+}
+

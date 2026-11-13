@@ -53,6 +53,28 @@ const getFeed = async (query: GetFeedParams, currentUserId?: string) => {
     where.authorId = { in: [...followingIds, currentUserId] };
   }
 
+  // Filter out any posts from blocked/blocking users
+  if (currentUserId) {
+    const blocks = await prisma.userBlock.findMany({
+      where: {
+        OR: [{ blockerId: currentUserId }, { blockedId: currentUserId }],
+      },
+      select: { blockerId: true, blockedId: true },
+    });
+
+    if (blocks.length > 0) {
+      const blockedIds = blocks.map((b) => (b.blockerId === currentUserId ? b.blockedId : b.blockerId));
+      if (authorId && blockedIds.includes(authorId)) {
+        return { data: [], meta: { page, limit, total: 0, totalPages: 0 } };
+      }
+      if (where.authorId && typeof where.authorId === 'object' && where.authorId.in) {
+        where.authorId.in = where.authorId.in.filter((id: string) => !blockedIds.includes(id));
+      } else if (!where.authorId) {
+        where.authorId = { notIn: blockedIds };
+      }
+    }
+  }
+
   const [posts, total] = await Promise.all([
     prisma.post.findMany({
       where,
@@ -261,7 +283,7 @@ const createPost = async (authorId: string, postData: any, userRole: string) => 
       postType,
       status,
       caption,
-      title: postType === 'RECIPE' ? title : null,
+      title: title || null,
       image: image || null,
       images,
       ingredients: postType === 'RECIPE' ? ingredients : null,
