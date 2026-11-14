@@ -16,6 +16,10 @@ router.post('/deactivate', requireAuth, AuthController.deactivateAccount);
 router.post('/delete', requireAuth, AuthController.deleteAccount);
 router.post('/delete-account', requireAuth, AuthController.deleteAccount);
 
+router.get('/notifications', optionalAuth, (_req, res) => {
+  res.json({ success: true, data: [] });
+});
+
 // Target user routes
 router.get('/:id', optionalAuth, UserController.getUserProfile);
 router.post('/:id/follow', requireAuth, UserController.toggleFollow);
