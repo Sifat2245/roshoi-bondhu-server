@@ -1,5 +1,6 @@
 import prisma from '../../lib/prisma.js';
 import { paginationUtils } from '../../shared/pagination/pagination.js';
+import { FriendsService } from '../friends/friends.service.js';
 
 interface GetFeedParams extends Record<string, unknown> {
   page?: string;
@@ -18,6 +19,7 @@ const getFeed = async (query: GetFeedParams, currentUserId?: string) => {
 
   const where: any = {
     status: 'PUBLISHED',
+    deletedAt: null,
   };
 
   if (type && ['CASUAL', 'RECIPE', 'REPOST'].includes(type.toUpperCase())) {
@@ -73,6 +75,53 @@ const getFeed = async (query: GetFeedParams, currentUserId?: string) => {
         where.authorId = { notIn: blockedIds };
       }
     }
+  }
+
+  // Audience & Privacy Filter (Phase 4)
+  // PUBLIC: visible to everyone
+  // FRIENDS: visible only to accepted friends
+  // ONLY_ME: visible only to the author
+  if (currentUserId) {
+    const friendIdsSet = await FriendsService.getFriendIdsForUser(currentUserId);
+    const friendIds = Array.from(friendIdsSet);
+
+    if (authorId) {
+      if (authorId !== currentUserId) {
+        // Viewing someone else's profile
+        const isFriend = friendIdsSet.has(authorId);
+        if (isFriend) {
+          where.audience = { in: ['PUBLIC', 'FRIENDS'] };
+        } else {
+          where.audience = 'PUBLIC';
+        }
+      }
+      // If authorId === currentUserId, the user can see all their own posts (PUBLIC, FRIENDS, ONLY_ME)
+    } else {
+      // General feed (no specific authorId requested)
+      const audienceOr: any[] = [
+        { authorId: currentUserId }, // Author sees all their own posts
+        { audience: 'PUBLIC' },      // Public posts from anyone
+      ];
+      if (friendIds.length > 0) {
+        audienceOr.push({
+          audience: 'FRIENDS',
+          authorId: { in: friendIds }, // Friends-only posts from user's friends
+        });
+      }
+
+      if (where.OR) {
+        where.AND = [
+          { OR: where.OR },
+          { OR: audienceOr },
+        ];
+        delete where.OR;
+      } else {
+        where.OR = audienceOr;
+      }
+    }
+  } else {
+    // Unauthenticated visitor: can only see PUBLIC posts
+    where.audience = 'PUBLIC';
   }
 
   const [posts, total] = await Promise.all([
@@ -218,8 +267,40 @@ const getPostById = async (id: string, currentUserId?: string) => {
     },
   });
 
-  if (!post) {
+  if (!post || post.deletedAt) {
     throw new Error('Post not found');
+  }
+
+  // Audience & Block access control (Phase 4)
+  if (currentUserId) {
+    if (post.authorId !== currentUserId) {
+      // Check block
+      const isBlocked = await prisma.userBlock.findFirst({
+        where: {
+          OR: [
+            { blockerId: currentUserId, blockedId: post.authorId },
+            { blockerId: post.authorId, blockedId: currentUserId },
+          ],
+        },
+      });
+      if (isBlocked) {
+        throw new Error('Post not found');
+      }
+
+      if (post.audience === 'ONLY_ME') {
+        throw new Error('This post is private.');
+      }
+      if (post.audience === 'FRIENDS') {
+        const friendIds = await FriendsService.getFriendIdsForUser(currentUserId);
+        if (!friendIds.has(post.authorId)) {
+          throw new Error('This post is only visible to friends of the author.');
+        }
+      }
+    }
+  } else {
+    if (post.audience !== 'PUBLIC') {
+      throw new Error('This post is private. Please sign in to view.');
+    }
   }
 
   return {
@@ -235,6 +316,7 @@ const getPostById = async (id: string, currentUserId?: string) => {
 const createPost = async (authorId: string, postData: any, userRole: string) => {
   const {
     postType = 'CASUAL',
+    audience = 'PUBLIC',
     caption,
     title,
     image,
@@ -247,6 +329,19 @@ const createPost = async (authorId: string, postData: any, userRole: string) => 
     categories = [],
     groupId,
   } = postData;
+
+  const validAudience = ['PUBLIC', 'FRIENDS', 'ONLY_ME'].includes(audience)
+    ? audience
+    : 'PUBLIC';
+
+  const resolvedImages: string[] =
+    Array.isArray(images) && images.length > 0
+      ? images
+      : image
+      ? [image]
+      : [];
+
+  const primaryImage = resolvedImages[0] || image || null;
 
   let status: 'PUBLISHED' | 'PENDING_APPROVAL' = 'PUBLISHED';
 
@@ -282,10 +377,11 @@ const createPost = async (authorId: string, postData: any, userRole: string) => 
       groupId: groupId || null,
       postType,
       status,
+      audience: groupId ? 'PUBLIC' : (validAudience as any),
       caption,
       title: title || null,
-      image: image || null,
-      images,
+      image: primaryImage,
+      images: resolvedImages,
       ingredients: postType === 'RECIPE' ? ingredients : null,
       instructions: postType === 'RECIPE' ? instructions : null,
       preparationTime: preparationTime ? parseInt(preparationTime) : null,
@@ -306,11 +402,28 @@ const createPost = async (authorId: string, postData: any, userRole: string) => 
   return newPost;
 };
 
-const repostPost = async (authorId: string, originalPostId: string, caption?: string, groupId?: string) => {
+const repostPost = async (
+  authorId: string,
+  originalPostId: string,
+  caption?: string,
+  groupId?: string,
+  audience?: any,
+) => {
   if (!originalPostId) throw new Error('Original post ID is required to share.');
 
   const original = await prisma.post.findUnique({ where: { id: originalPostId } });
   if (!original) throw new Error('Original post not found.');
+
+  if (original.audience === 'ONLY_ME') {
+    throw new Error('This post is private and cannot be shared.');
+  }
+
+  if (original.audience === 'FRIENDS' && original.authorId !== authorId) {
+    const friendIds = await FriendsService.getFriendIdsForUser(authorId);
+    if (!friendIds.has(original.authorId)) {
+      throw new Error('This post is only visible to friends and cannot be shared.');
+    }
+  }
 
   return await prisma.post.create({
     data: {
@@ -318,6 +431,7 @@ const repostPost = async (authorId: string, originalPostId: string, caption?: st
       groupId: groupId || null,
       postType: 'REPOST',
       status: 'PUBLISHED',
+      audience: audience || 'PUBLIC',
       caption,
       originalPostId: original.id,
     },
@@ -376,7 +490,7 @@ const deletePost = async (userId: string, userRole: string, postId: string) => {
     include: { group: { include: { members: { where: { userId } } } } },
   });
 
-  if (!post) throw new Error('Post not found.');
+  if (!post || post.deletedAt) throw new Error('Post not found.');
 
   const isAuthor = post.authorId === userId;
   const isPlatformStaff = ['ADMIN', 'MODERATOR'].includes(userRole);
@@ -389,8 +503,130 @@ const deletePost = async (userId: string, userRole: string, postId: string) => {
     throw new Error('Not authorized to delete this post.');
   }
 
-  await prisma.post.delete({ where: { id: postId } });
-  return { id: postId };
+  // Soft-delete to trash
+  await prisma.post.update({
+    where: { id: postId },
+    data: { deletedAt: new Date() },
+  });
+
+  return { id: postId, trashed: true };
+};
+
+const getTrash = async (userId: string) => {
+  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+
+  // Automatically purge any trashed posts that have stayed in trash for over 30 days
+  await prisma.post.deleteMany({
+    where: {
+      authorId: userId,
+      deletedAt: {
+        lt: thirtyDaysAgo,
+      },
+    },
+  });
+
+  // Retrieve valid trashed posts (within 30-day window)
+  const trashedPosts = await prisma.post.findMany({
+    where: {
+      authorId: userId,
+      deletedAt: {
+        gte: thirtyDaysAgo,
+      },
+    },
+    orderBy: {
+      deletedAt: 'desc',
+    },
+    include: {
+      author: {
+        select: {
+          id: true,
+          name: true,
+          image: true,
+        },
+      },
+      _count: {
+        select: {
+          likes: true,
+          comments: true,
+        },
+      },
+    },
+  });
+
+  return trashedPosts.map((p) => {
+    const deletedTime = p.deletedAt ? new Date(p.deletedAt).getTime() : Date.now();
+    const elapsedDays = Math.floor((Date.now() - deletedTime) / (24 * 60 * 60 * 1000));
+    const daysRemaining = Math.max(0, 30 - elapsedDays);
+    return {
+      ...p,
+      daysRemaining,
+      likeCount: p._count.likes,
+      commentCount: p._count.comments,
+    };
+  });
+};
+
+const restorePost = async (userId: string, postId: string) => {
+  const post = await prisma.post.findUnique({
+    where: { id: postId },
+  });
+
+  if (!post || !post.deletedAt) {
+    throw new Error('Post not found in trash.');
+  }
+
+  if (post.authorId !== userId) {
+    throw new Error('Not authorized to restore this post.');
+  }
+
+  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+  if (post.deletedAt < thirtyDaysAgo) {
+    await prisma.post.delete({ where: { id: postId } });
+    throw new Error('This post has passed the 30-day trash window and was permanently removed.');
+  }
+
+  const restored = await prisma.post.update({
+    where: { id: postId },
+    data: { deletedAt: null },
+  });
+
+  return restored;
+};
+
+const permanentDeletePost = async (userId: string, userRole: string, postId: string) => {
+  const post = await prisma.post.findUnique({
+    where: { id: postId },
+  });
+
+  if (!post) {
+    throw new Error('Post not found.');
+  }
+
+  const isAuthor = post.authorId === userId;
+  const isPlatformStaff = ['ADMIN', 'MODERATOR'].includes(userRole);
+
+  if (!isAuthor && !isPlatformStaff) {
+    throw new Error('Not authorized to permanently delete this post.');
+  }
+
+  await prisma.post.delete({
+    where: { id: postId },
+  });
+
+  return { id: postId, permanentlyDeleted: true };
+};
+
+const emptyTrash = async (userId: string) => {
+  const result = await prisma.post.deleteMany({
+    where: {
+      authorId: userId,
+      deletedAt: {
+        not: null,
+      },
+    },
+  });
+
+  return { count: result.count };
 };
 
 export const PostService = {
@@ -401,6 +637,10 @@ export const PostService = {
   toggleLike,
   createComment,
   deletePost,
+  getTrash,
+  restorePost,
+  permanentDeletePost,
+  emptyTrash,
 };
 
 export default PostService;

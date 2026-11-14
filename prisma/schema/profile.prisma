@@ -37,6 +37,15 @@ model UserPreference {
   friendRequestPolicy String   @default("EVERYONE") // EVERYONE, FRIENDS_OF_FRIENDS
   messagePolicy       String   @default("EVERYONE") // EVERYONE, FRIENDS
   twoFactorEnabled    Boolean  @default(false)
+
+  // Media Preferences
+  highQualityUploads     Boolean  @default(true)
+  hdrVideo               Boolean  @default(false)
+  autoplay               String   @default("WIFI_ONLY") // ALWAYS, WIFI_ONLY, NEVER
+  dataSaver              Boolean  @default(false)
+  stepGalleryFullscreen  Boolean  @default(true)
+  showNutritionOverlay   Boolean  @default(false)
+
   version             Int      @default(1)
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt

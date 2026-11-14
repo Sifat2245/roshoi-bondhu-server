@@ -32,6 +32,12 @@ export interface UpdatePreferencesInput {
   friendRequestPolicy?: string;
   messagePolicy?: string;
   twoFactorEnabled?: boolean;
+  highQualityUploads?: boolean;
+  hdrVideo?: boolean;
+  autoplay?: string;
+  dataSaver?: boolean;
+  stepGalleryFullscreen?: boolean;
+  showNutritionOverlay?: boolean;
 }
 
 const getUserProfile = async (targetUserIdOrSlug: string, currentUserId?: string) => {
@@ -389,6 +395,12 @@ const getPreferences = async (userId: string) => {
         friendRequestPolicy: 'EVERYONE',
         messagePolicy: 'EVERYONE',
         twoFactorEnabled: false,
+        highQualityUploads: true,
+        hdrVideo: false,
+        autoplay: 'WIFI_ONLY',
+        dataSaver: false,
+        stepGalleryFullscreen: true,
+        showNutritionOverlay: false,
       },
     });
   }
@@ -405,6 +417,12 @@ const updatePreferences = async (userId: string, data: UpdatePreferencesInput) =
     friendRequestPolicy,
     messagePolicy,
     twoFactorEnabled,
+    highQualityUploads,
+    hdrVideo,
+    autoplay,
+    dataSaver,
+    stepGalleryFullscreen,
+    showNutritionOverlay,
   } = data;
 
   if (theme !== undefined && !['SYSTEM', 'LIGHT', 'DARK'].includes(theme)) {
@@ -422,6 +440,9 @@ const updatePreferences = async (userId: string, data: UpdatePreferencesInput) =
   if (messagePolicy !== undefined && !['EVERYONE', 'FRIENDS'].includes(messagePolicy)) {
     throw new ValidationError('Message policy must be EVERYONE or FRIENDS.');
   }
+  if (autoplay !== undefined && !['ALWAYS', 'WIFI_ONLY', 'NEVER'].includes(autoplay)) {
+    throw new ValidationError('Autoplay must be ALWAYS, WIFI_ONLY, or NEVER.');
+  }
 
   return await prisma.userPreference.upsert({
     where: { userId },
@@ -434,6 +455,12 @@ const updatePreferences = async (userId: string, data: UpdatePreferencesInput) =
       friendRequestPolicy: friendRequestPolicy || 'EVERYONE',
       messagePolicy: messagePolicy || 'EVERYONE',
       twoFactorEnabled: twoFactorEnabled !== undefined ? twoFactorEnabled : false,
+      highQualityUploads: highQualityUploads !== undefined ? highQualityUploads : true,
+      hdrVideo: hdrVideo !== undefined ? hdrVideo : false,
+      autoplay: autoplay || 'WIFI_ONLY',
+      dataSaver: dataSaver !== undefined ? dataSaver : false,
+      stepGalleryFullscreen: stepGalleryFullscreen !== undefined ? stepGalleryFullscreen : true,
+      showNutritionOverlay: showNutritionOverlay !== undefined ? showNutritionOverlay : false,
     },
     update: {
       theme: theme !== undefined ? theme : undefined,
@@ -443,6 +470,12 @@ const updatePreferences = async (userId: string, data: UpdatePreferencesInput) =
       friendRequestPolicy: friendRequestPolicy !== undefined ? friendRequestPolicy : undefined,
       messagePolicy: messagePolicy !== undefined ? messagePolicy : undefined,
       twoFactorEnabled: twoFactorEnabled !== undefined ? twoFactorEnabled : undefined,
+      highQualityUploads: highQualityUploads !== undefined ? highQualityUploads : undefined,
+      hdrVideo: hdrVideo !== undefined ? hdrVideo : undefined,
+      autoplay: autoplay !== undefined ? autoplay : undefined,
+      dataSaver: dataSaver !== undefined ? dataSaver : undefined,
+      stepGalleryFullscreen: stepGalleryFullscreen !== undefined ? stepGalleryFullscreen : undefined,
+      showNutritionOverlay: showNutritionOverlay !== undefined ? showNutritionOverlay : undefined,
     },
   });
 };

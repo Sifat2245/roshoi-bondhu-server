@@ -6,10 +6,11 @@ model Post {
   groupId         String?
   group           Group?      @relation(fields: [groupId], references: [id], onDelete: Cascade)
   
-  postType        PostType    @default(CASUAL)
-  status          PostStatus  @default(PUBLISHED)
+  postType        PostType      @default(CASUAL)
+  status          PostStatus    @default(PUBLISHED)
+  audience        PostAudience  @default(PUBLIC)
 
-  caption         String?     @db.Text
+  caption         String?       @db.Text
   
   title           String?
   image           String?
@@ -30,9 +31,12 @@ model Post {
 
   createdAt       DateTime    @default(now())
   updatedAt       DateTime    @updatedAt
+  deletedAt       DateTime?
 
   @@index([authorId])
   @@index([groupId])
+  @@index([audience])
+  @@index([deletedAt])
 }
 
 model Like {

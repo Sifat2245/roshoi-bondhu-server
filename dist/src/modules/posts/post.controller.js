@@ -33,8 +33,9 @@ const createPost = CatchAsync(async (req, res) => {
     });
 });
 const repostPost = CatchAsync(async (req, res) => {
-    const { originalPostId, caption, groupId } = req.body;
-    const result = await PostService.repostPost(req.user.id, originalPostId, caption, groupId);
+    const { originalPostId, caption, groupId, audience } = req.body;
+    const targetId = originalPostId || req.params.id;
+    const result = await PostService.repostPost(req.user.id, targetId, caption, groupId, audience);
     sendResponse(res, {
         statusCode: 201,
         success: true,
@@ -69,7 +70,45 @@ const deletePost = CatchAsync(async (req, res) => {
     sendResponse(res, {
         statusCode: 200,
         success: true,
-        message: 'Post removed successfully.',
+        message: 'Post moved to trash successfully.',
+        data: result,
+    });
+});
+const getTrash = CatchAsync(async (req, res) => {
+    const result = await PostService.getTrash(req.user.id);
+    sendResponse(res, {
+        statusCode: 200,
+        success: true,
+        message: 'Trash items retrieved successfully.',
+        data: result,
+    });
+});
+const restorePost = CatchAsync(async (req, res) => {
+    const postId = req.params.id;
+    const result = await PostService.restorePost(req.user.id, postId);
+    sendResponse(res, {
+        statusCode: 200,
+        success: true,
+        message: 'Post restored successfully.',
+        data: result,
+    });
+});
+const permanentDeletePost = CatchAsync(async (req, res) => {
+    const postId = req.params.id;
+    const result = await PostService.permanentDeletePost(req.user.id, req.user.role, postId);
+    sendResponse(res, {
+        statusCode: 200,
+        success: true,
+        message: 'Post permanently deleted.',
+        data: result,
+    });
+});
+const emptyTrash = CatchAsync(async (req, res) => {
+    const result = await PostService.emptyTrash(req.user.id);
+    sendResponse(res, {
+        statusCode: 200,
+        success: true,
+        message: 'Trash emptied successfully.',
         data: result,
     });
 });
@@ -81,5 +120,9 @@ export const PostController = {
     toggleLike,
     createComment,
     deletePost,
+    getTrash,
+    restorePost,
+    permanentDeletePost,
+    emptyTrash,
 };
 export default PostController;

@@ -34,6 +34,12 @@ enum PostStatus {
   REJECTED
 }
 
+enum PostAudience {
+  PUBLIC
+  FRIENDS
+  ONLY_ME
+}
+
 enum ReportStatus {
   PENDING
   RESOLVED
