@@ -52,6 +52,36 @@ export const postResolvers = {
       }
 
       if (groupId) {
+        const targetGroup = await context.prisma.group.findUnique({
+          where: { id: groupId },
+          select: { id: true, privacy: true },
+        });
+        if (!targetGroup) {
+          return {
+            edges: [],
+            pageInfo: {
+              hasNextPage: false,
+              hasPreviousPage: false,
+              startCursor: null,
+              endCursor: null,
+            },
+            totalCount: 0,
+          };
+        }
+        if (targetGroup.privacy === 'PRIVATE' || (targetGroup.privacy as any) === 'SECRET') {
+          if (!currentUserId) {
+            throw new Error('This group is private. Please sign in to view its posts.');
+          }
+          const isPlatformStaff = context.currentUser?.role && ['ADMIN', 'MODERATOR'].includes(context.currentUser.role);
+          if (!isPlatformStaff) {
+            const membership = await context.prisma.groupMember.findUnique({
+              where: { groupId_userId: { groupId, userId: currentUserId } },
+            });
+            if (!membership || !membership.isApproved) {
+              throw new Error('This group is private. You must be an approved member to view its posts.');
+            }
+          }
+        }
         where.groupId = groupId;
       }
 
@@ -134,6 +164,36 @@ export const postResolvers = {
         }
       } else {
         where.audience = 'PUBLIC';
+      }
+
+      // If not querying a specific group, ensure posts from private groups do not leak into the general feed
+      if (!groupId) {
+        const groupPrivacyCondition = {
+          OR: [
+            { groupId: null },
+            { group: { privacy: 'PUBLIC' } },
+            ...(currentUserId
+              ? [
+                  {
+                    group: {
+                      members: {
+                        some: { userId: currentUserId, isApproved: true },
+                      },
+                    },
+                  },
+                ]
+              : []),
+          ],
+        };
+
+        if (where.AND) {
+          where.AND.push(groupPrivacyCondition);
+        } else if (where.OR) {
+          where.AND = [{ OR: where.OR }, groupPrivacyCondition];
+          delete where.OR;
+        } else {
+          where.AND = [groupPrivacyCondition];
+        }
       }
 
       let cursorObj: { id: string } | undefined = undefined;

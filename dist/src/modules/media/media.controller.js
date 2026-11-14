@@ -9,7 +9,9 @@ const uploadImage = CatchAsync(async (req, res) => {
             message: 'No image file uploaded.',
         });
     }
-    const folder = req.body.folder || 'hesheli';
+    const rawFolder = req.body.folder || 'hesheli';
+    // Sanitize folder: alphanumeric and hyphens/underscores only, max 32 chars to prevent path traversal
+    const folder = rawFolder.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 32) || 'hesheli';
     const url = await uploadToCloudinary(req.file.buffer, folder);
     sendResponse(res, {
         statusCode: 200,

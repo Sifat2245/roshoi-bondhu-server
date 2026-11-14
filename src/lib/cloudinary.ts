@@ -12,14 +12,23 @@ cloudinary.config({
 
 const storage = multer.memoryStorage();
 
+const ALLOWED_MIME_TYPES = new Set([
+  'image/jpeg',
+  'image/jpg',
+  'image/png',
+  'image/webp',
+  'image/gif',
+]);
+
 export const upload = multer({
   storage,
   limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
   fileFilter: (_req, file, cb) => {
-    if (file.mimetype.startsWith('image/')) {
+    const mime = (file.mimetype || '').toLowerCase();
+    if (ALLOWED_MIME_TYPES.has(mime)) {
       cb(null, true);
     } else {
-      cb(new Error('Only image files are allowed!'));
+      cb(new Error('Invalid image type. Only JPEG, PNG, WEBP, and GIF images are permitted (SVGs are blocked for security).'));
     }
   },
 });

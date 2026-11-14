@@ -12,7 +12,9 @@ const uploadImage = CatchAsync(async (req: Request, res: Response) => {
     });
   }
 
-  const folder = (req.body.folder as string) || 'hesheli';
+  const rawFolder = (req.body.folder as string) || 'hesheli';
+  // Sanitize folder: alphanumeric and hyphens/underscores only, max 32 chars to prevent path traversal
+  const folder = rawFolder.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 32) || 'hesheli';
   const url = await uploadToCloudinary(req.file.buffer, folder);
 
   sendResponse(res, {

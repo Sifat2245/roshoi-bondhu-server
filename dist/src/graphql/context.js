@@ -84,9 +84,27 @@ export const createContext = async (initialContext) => {
                 const authSession = await auth.api.getSession({
                     headers: headers,
                 });
-                if (authSession?.user) {
-                    currentUser = authSession.user;
-                    session = authSession.session;
+                if (authSession?.user?.id) {
+                    const user = await prisma.user.findUnique({
+                        where: { id: authSession.user.id },
+                        select: {
+                            id: true,
+                            name: true,
+                            email: true,
+                            image: true,
+                            role: true,
+                            status: true,
+                            isBanned: true,
+                            bio: true,
+                            coverImage: true,
+                            phone: true,
+                            emailVerified: true,
+                        },
+                    });
+                    if (user && user.status !== 'DELETED' && !user.isBanned) {
+                        currentUser = user;
+                        session = authSession.session;
+                    }
                 }
             }
             catch {

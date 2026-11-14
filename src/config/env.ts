@@ -51,5 +51,27 @@ export const env: EnvConfig = {
   SMTP_FROM: process.env.SMTP_FROM || '"Heshel • হেঁশেল" <no-reply@heshel.com>',
 };
 
+// Strict production validation: abort startup if essential secrets are missing or using dev fallbacks
+if (env.NODE_ENV === 'production') {
+  const missingOrInsecure: string[] = [];
+  if (!process.env.BETTER_AUTH_SECRET || process.env.BETTER_AUTH_SECRET === 'hesheli-super-secret-key-fallback') {
+    missingOrInsecure.push('BETTER_AUTH_SECRET');
+  }
+  if (!process.env.JWT_ACCESS_SECRET || process.env.JWT_ACCESS_SECRET === 'hesheli-access-secret') {
+    missingOrInsecure.push('JWT_ACCESS_SECRET');
+  }
+  if (!process.env.JWT_REFRESH_SECRET || process.env.JWT_REFRESH_SECRET === 'hesheli-refresh-secret') {
+    missingOrInsecure.push('JWT_REFRESH_SECRET');
+  }
+  if (!process.env.DATABASE_URL) {
+    missingOrInsecure.push('DATABASE_URL');
+  }
+  if (missingOrInsecure.length > 0) {
+    throw new Error(
+      `[CRITICAL SECURITY] Production environment is missing required secure secrets: ${missingOrInsecure.join(', ')}. Server startup aborted.`
+    );
+  }
+}
+
 export const envVariables = env;
 export default env;

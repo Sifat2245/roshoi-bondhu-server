@@ -93,9 +93,27 @@ export const createContext = async (initialContext: YogaInitialContext): Promise
           headers: headers as any,
         });
 
-        if (authSession?.user) {
-          currentUser = authSession.user as GraphQLUser;
-          session = authSession.session;
+        if (authSession?.user?.id) {
+          const user = await prisma.user.findUnique({
+            where: { id: authSession.user.id },
+            select: {
+              id: true,
+              name: true,
+              email: true,
+              image: true,
+              role: true,
+              status: true,
+              isBanned: true,
+              bio: true,
+              coverImage: true,
+              phone: true,
+              emailVerified: true,
+            },
+          });
+          if (user && (user as any).status !== 'DELETED' && !user.isBanned) {
+            currentUser = user as GraphQLUser;
+            session = authSession.session;
+          }
         }
       } catch {
         // Session check failed safely
