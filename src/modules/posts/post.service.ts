@@ -425,10 +425,17 @@ const repostPost = async (
     }
   }
 
+  const resolvedGroupId =
+    typeof groupId === 'string' &&
+    groupId.trim() &&
+    !['PUBLIC', 'FRIENDS', 'ONLY_ME'].includes(groupId)
+      ? groupId.trim()
+      : null;
+
   return await prisma.post.create({
     data: {
       authorId,
-      groupId: groupId || null,
+      groupId: resolvedGroupId,
       postType: 'REPOST',
       status: 'PUBLISHED',
       audience: audience || 'PUBLIC',
@@ -469,6 +476,19 @@ const toggleLike = async (userId: string, postId: string) => {
 const createComment = async (userId: string, postId: string, content: string, parentId?: string) => {
   if (!content || !content.trim()) throw new Error('Comment content cannot be empty.');
 
+  const post = await prisma.post.findUnique({
+    where: { id: postId },
+    select: { id: true, isCommentDisabled: true, deletedAt: true },
+  });
+
+  if (!post || post.deletedAt) {
+    throw new Error('Post not found.');
+  }
+
+  if (post.isCommentDisabled) {
+    throw new Error('Commenting has been turned off for this post.');
+  }
+
   return await prisma.comment.create({
     data: {
       userId,
@@ -478,7 +498,12 @@ const createComment = async (userId: string, postId: string, content: string, pa
     },
     include: {
       user: {
-        select: { id: true, name: true, image: true },
+        select: { id: true, name: true, image: true, role: true },
+      },
+      replies: {
+        include: {
+          user: { select: { id: true, name: true, image: true, role: true } },
+        },
       },
     },
   });

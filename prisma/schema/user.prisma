@@ -27,6 +27,7 @@ model User {
   // Relations
   posts         Post[]
   likes         Like[]
+  commentLikes  CommentLike[]
   comments      Comment[]
   createdGroups Group[]       @relation("GroupCreator")
   groupMembers  GroupMember[]

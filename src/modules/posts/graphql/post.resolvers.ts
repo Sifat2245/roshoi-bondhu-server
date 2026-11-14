@@ -470,6 +470,7 @@ export const postResolvers = {
         context.currentUser.id,
         args.originalPostId,
         args.caption,
+        undefined,
         args.audience
       );
       return {
@@ -492,6 +493,46 @@ export const postResolvers = {
       return await PostService.toggleLike(context.currentUser.id, args.postId);
     },
 
+    toggleCommentsDisabled: async (
+      _parent: unknown,
+      args: { postId: string },
+      context: GraphQLContext
+    ) => {
+      if (!context.currentUser) {
+        throw new Error('Authentication required.');
+      }
+      const post = await context.prisma.post.findUnique({
+        where: { id: args.postId },
+        include: {
+          author: { select: { id: true, name: true, image: true, role: true, bio: true } },
+          _count: { select: { likes: true, comments: true, reposts: true } },
+        },
+      });
+      if (!post) throw new Error('Post not found.');
+      const isAuthor = post.authorId === context.currentUser.id;
+      const isPlatformStaff = ['ADMIN', 'MODERATOR'].includes(context.currentUser.role);
+      if (!isAuthor && !isPlatformStaff) {
+        throw new Error('Only the author can change commenting settings for this post.');
+      }
+      const updated = await context.prisma.post.update({
+        where: { id: args.postId },
+        data: { isCommentDisabled: !post.isCommentDisabled },
+        include: {
+          author: { select: { id: true, name: true, image: true, role: true, bio: true } },
+          _count: { select: { likes: true, comments: true, reposts: true } },
+        },
+      });
+      return {
+        ...updated,
+        likeCount: updated._count.likes,
+        commentCount: updated._count.comments,
+        repostCount: updated._count.reposts,
+        hasLiked: false,
+        createdAt: updated.createdAt.toISOString(),
+        updatedAt: updated.updatedAt ? updated.updatedAt.toISOString() : null,
+      };
+    },
+
     createComment: async (
       _parent: unknown,
       args: { postId: string; content: string; parentId?: string },
@@ -508,6 +549,44 @@ export const postResolvers = {
       );
     },
 
+    updateComment: async (
+      _parent: unknown,
+      args: { id: string; content: string },
+      context: GraphQLContext
+    ) => {
+      if (!context.currentUser) {
+        throw new Error('Authentication required.');
+      }
+      if (!args.content || !args.content.trim()) {
+        throw new Error('Comment content cannot be empty.');
+      }
+      const comment = await context.prisma.comment.findUnique({
+        where: { id: args.id },
+      });
+      if (!comment) throw new Error('Comment not found.');
+      if (comment.userId !== context.currentUser.id) {
+        throw new Error('You can only edit your own comments.');
+      }
+      const updated = await context.prisma.comment.update({
+        where: { id: args.id },
+        data: { content: args.content.trim() },
+        include: {
+          user: { select: { id: true, name: true, image: true, role: true } },
+          replies: {
+            include: {
+              user: { select: { id: true, name: true, image: true, role: true } },
+            },
+            orderBy: { createdAt: 'asc' },
+          },
+        },
+      });
+      return {
+        ...updated,
+        createdAt: updated.createdAt.toISOString(),
+        updatedAt: updated.updatedAt ? updated.updatedAt.toISOString() : null,
+      };
+    },
+
     deleteComment: async (
       _parent: unknown,
       args: { id: string },
@@ -518,13 +597,60 @@ export const postResolvers = {
       }
       const comment = await context.prisma.comment.findUnique({
         where: { id: args.id },
+        include: { post: { select: { authorId: true } } },
       });
       if (!comment) throw new Error('Comment not found.');
-      if (comment.userId !== context.currentUser.id && context.currentUser.role !== 'ADMIN') {
+      const isCommentAuthor = comment.userId === context.currentUser.id;
+      const isPostAuthor = comment.post?.authorId === context.currentUser.id;
+      const isPlatformStaff = ['ADMIN', 'MODERATOR'].includes(context.currentUser.role);
+      if (!isCommentAuthor && !isPostAuthor && !isPlatformStaff) {
         throw new Error('Not authorized to delete this comment.');
       }
       await context.prisma.comment.delete({ where: { id: args.id } });
       return true;
+    },
+
+    toggleCommentLike: async (
+      _parent: unknown,
+      args: { commentId: string },
+      context: GraphQLContext
+    ) => {
+      if (!context.currentUser) {
+        throw new Error('Authentication required.');
+      }
+      const comment = await context.prisma.comment.findUnique({
+        where: { id: args.commentId },
+      });
+      if (!comment) throw new Error('Comment not found.');
+
+      const existing = await context.prisma.commentLike.findUnique({
+        where: {
+          userId_commentId: {
+            userId: context.currentUser.id,
+            commentId: args.commentId,
+          },
+        },
+      });
+
+      let liked = false;
+      if (existing) {
+        await context.prisma.commentLike.delete({ where: { id: existing.id } });
+        liked = false;
+      } else {
+        await context.prisma.commentLike.create({
+          data: {
+            userId: context.currentUser.id,
+            commentId: args.commentId,
+          },
+        });
+        liked = true;
+      }
+
+      const likeCount = await context.prisma.commentLike.count({
+        where: { commentId: args.commentId },
+      });
+
+      return { liked, likeCount };
     },
 
     deletePost: async (
@@ -597,10 +723,20 @@ export const postResolvers = {
         : [],
     categories: (post: any) => (Array.isArray(post.categories) ? post.categories : []),
     ingredients: (post: any) => {
-      if (Array.isArray(post.ingredients)) return post.ingredients;
+      if (Array.isArray(post.ingredients)) {
+        return post.ingredients.map((item: any) =>
+          typeof item === 'string' ? item : item?.text || item?.name || JSON.stringify(item)
+        );
+      }
       if (typeof post.ingredients === 'string') {
         try {
-          return JSON.parse(post.ingredients);
+          const parsed = JSON.parse(post.ingredients);
+          if (Array.isArray(parsed)) {
+            return parsed.map((item: any) =>
+              typeof item === 'string' ? item : item?.text || item?.name || JSON.stringify(item)
+            );
+          }
+          return [post.ingredients];
         } catch {
           return [post.ingredients];
         }
@@ -608,10 +744,20 @@ export const postResolvers = {
       return [];
     },
     instructions: (post: any) => {
-      if (Array.isArray(post.instructions)) return post.instructions;
+      if (Array.isArray(post.instructions)) {
+        return post.instructions.map((item: any) =>
+          typeof item === 'string' ? item : JSON.stringify(item)
+        );
+      }
       if (typeof post.instructions === 'string') {
         try {
-          return JSON.parse(post.instructions);
+          const parsed = JSON.parse(post.instructions);
+          if (Array.isArray(parsed)) {
+            return parsed.map((item: any) =>
+              typeof item === 'string' ? item : JSON.stringify(item)
+            );
+          }
+          return [post.instructions];
         } catch {
           return [post.instructions];
         }
@@ -636,9 +782,42 @@ export const postResolvers = {
     commentCount: (post: any) => post.commentCount ?? post._count?.comments ?? 0,
     repostCount: (post: any) => post.repostCount ?? post._count?.reposts ?? 0,
     hasLiked: (post: any) => Boolean(post.hasLiked),
+    isCommentDisabled: (post: any) => Boolean(post.isCommentDisabled),
+    comments: async (post: any, _args: unknown, context: GraphQLContext) => {
+      if (post.comments && Array.isArray(post.comments)) {
+        return post.comments;
+      }
+      const currentUserId = context.currentUser?.id;
+      return await context.prisma.comment.findMany({
+        where: { postId: post.id, parentId: null },
+        orderBy: { createdAt: 'desc' },
+        include: {
+          user: {
+            select: { id: true, name: true, image: true, role: true },
+          },
+          _count: {
+            select: { likes: true },
+          },
+          likes: currentUserId
+            ? { where: { userId: currentUserId }, select: { id: true } }
+            : false,
+          replies: {
+            include: {
+              user: { select: { id: true, name: true, image: true, role: true } },
+              _count: { select: { likes: true } },
+              likes: currentUserId
+                ? { where: { userId: currentUserId }, select: { id: true } }
+                : false,
+            },
+            orderBy: { createdAt: 'asc' },
+          },
+        },
+      });
+    },
   },
 
   OriginalPost: {
+    isCommentDisabled: (post: any) => Boolean(post.isCommentDisabled),
     postType: (post: any) => {
       const pt = String(post.postType || 'CASUAL').toUpperCase();
       return ['CASUAL', 'RECIPE', 'REPOST'].includes(pt) ? pt : 'CASUAL';
@@ -650,10 +829,20 @@ export const postResolvers = {
         ? [post.image]
         : [],
     ingredients: (post: any) => {
-      if (Array.isArray(post.ingredients)) return post.ingredients;
+      if (Array.isArray(post.ingredients)) {
+        return post.ingredients.map((item: any) =>
+          typeof item === 'string' ? item : item?.text || item?.name || JSON.stringify(item)
+        );
+      }
       if (typeof post.ingredients === 'string') {
         try {
-          return JSON.parse(post.ingredients);
+          const parsed = JSON.parse(post.ingredients);
+          if (Array.isArray(parsed)) {
+            return parsed.map((item: any) =>
+              typeof item === 'string' ? item : item?.text || item?.name || JSON.stringify(item)
+            );
+          }
+          return [post.ingredients];
         } catch {
           return [post.ingredients];
         }
@@ -661,10 +850,20 @@ export const postResolvers = {
       return [];
     },
     instructions: (post: any) => {
-      if (Array.isArray(post.instructions)) return post.instructions;
+      if (Array.isArray(post.instructions)) {
+        return post.instructions.map((item: any) =>
+          typeof item === 'string' ? item : JSON.stringify(item)
+        );
+      }
       if (typeof post.instructions === 'string') {
         try {
-          return JSON.parse(post.instructions);
+          const parsed = JSON.parse(post.instructions);
+          if (Array.isArray(parsed)) {
+            return parsed.map((item: any) =>
+              typeof item === 'string' ? item : JSON.stringify(item)
+            );
+          }
+          return [post.instructions];
         } catch {
           return [post.instructions];
         }
@@ -680,6 +879,23 @@ export const postResolvers = {
       c.createdAt instanceof Date ? c.createdAt.toISOString() : String(c.createdAt || ''),
     updatedAt: (c: any) =>
       c.updatedAt instanceof Date ? c.updatedAt.toISOString() : c.updatedAt ? String(c.updatedAt) : null,
+    likeCount: (c: any) => c.likeCount ?? c._count?.likes ?? 0,
+    hasLiked: (c: any) =>
+      typeof c.hasLiked === 'boolean'
+        ? c.hasLiked
+        : Boolean(c.likes && Array.isArray(c.likes) && c.likes.length > 0),
+  },
+
+  PostCommentReply: {
+    createdAt: (c: any) =>
+      c.createdAt instanceof Date ? c.createdAt.toISOString() : String(c.createdAt || ''),
+    updatedAt: (c: any) =>
+      c.updatedAt instanceof Date ? c.updatedAt.toISOString() : c.updatedAt ? String(c.updatedAt) : null,
+    likeCount: (c: any) => c.likeCount ?? c._count?.likes ?? 0,
+    hasLiked: (c: any) =>
+      typeof c.hasLiked === 'boolean'
+        ? c.hasLiked
+        : Boolean(c.likes && Array.isArray(c.likes) && c.likes.length > 0),
   },
 };
 
