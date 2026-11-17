@@ -254,6 +254,21 @@ export const postResolvers = {
                 select: { id: true },
               }
             : false,
+          poll: {
+            include: {
+              post: { select: { authorId: true } },
+              options: {
+                include: {
+                  votes: {
+                    include: {
+                      user: { select: { id: true, name: true, image: true, role: true } },
+                    },
+                  },
+                },
+                orderBy: { createdAt: 'asc' },
+              },
+            },
+          },
         },
       });
 
@@ -419,7 +434,22 @@ export const postResolvers = {
 
     updatePost: async (
       _parent: unknown,
-      args: { id: string; input: { caption?: string; title?: string } },
+      args: {
+        id: string;
+        input: {
+          caption?: string;
+          title?: string;
+          audience?: any;
+          image?: string;
+          images?: string[];
+          ingredients?: string[];
+          instructions?: string[];
+          preparationTime?: number;
+          servings?: number;
+          cuisine?: string;
+          poll?: any;
+        };
+      },
       context: GraphQLContext
     ) => {
       if (!context.currentUser) {
@@ -434,28 +464,47 @@ export const postResolvers = {
       if (existing.authorId !== context.currentUser.id && context.currentUser.role !== 'ADMIN') {
         throw new Error('Not authorized to edit this post.');
       }
-      const updated = await context.prisma.post.update({
+
+      if (args.input.poll) {
+        const existingPoll = await (context.prisma as any).poll.findUnique({
+          where: { postId: args.id },
+        });
+        if (existingPoll) {
+          await PostService.updatePoll(
+            context.currentUser.id,
+            context.currentUser.role,
+            existingPoll.id,
+            args.input.poll
+          );
+        }
+      }
+
+      const updateData: any = {};
+      if (args.input.caption !== undefined) updateData.caption = args.input.caption;
+      if (args.input.title !== undefined) updateData.title = args.input.title;
+      if (args.input.audience !== undefined) updateData.audience = args.input.audience;
+      if (args.input.ingredients !== undefined) updateData.ingredients = args.input.ingredients;
+      if (args.input.instructions !== undefined) updateData.instructions = args.input.instructions;
+      if (args.input.preparationTime !== undefined) updateData.preparationTime = args.input.preparationTime;
+      if (args.input.servings !== undefined) updateData.servings = args.input.servings;
+      if (args.input.cuisine !== undefined) updateData.cuisine = args.input.cuisine;
+      if (args.input.images !== undefined) {
+        updateData.images = args.input.images;
+        updateData.image = args.input.images.length > 0 ? args.input.images[0] : null;
+      } else if (args.input.image !== undefined) {
+        updateData.image = args.input.image;
+        if (args.input.image && (!existing.images || existing.images.length === 0)) {
+          updateData.images = [args.input.image];
+        }
+      }
+
+      await context.prisma.post.update({
         where: { id: args.id },
-        data: {
-          caption: args.input.caption ?? existing.caption,
-          title: args.input.title ?? existing.title,
-        },
-        include: {
-          author: {
-            select: { id: true, name: true, image: true, role: true },
-          },
-          _count: {
-            select: { likes: true, comments: true, reposts: true },
-          },
-        },
+        data: updateData,
       });
-      return {
-        ...updated,
-        likeCount: updated._count.likes,
-        commentCount: updated._count.comments,
-        repostCount: updated._count.reposts,
-        hasLiked: false,
-      };
+
+      const fullUpdatedPost = await PostService.getPostById(args.id, context.currentUser.id);
+      return fullUpdatedPost;
     },
 
     repostPost: async (
@@ -618,39 +667,71 @@ export const postResolvers = {
       if (!context.currentUser) {
         throw new Error('Authentication required.');
       }
-      const comment = await context.prisma.comment.findUnique({
-        where: { id: args.commentId },
-      });
-      if (!comment) throw new Error('Comment not found.');
+      return await PostService.toggleCommentLike(
+        context.currentUser.id,
+        args.commentId
+      );
+    },
 
-      const existing = await context.prisma.commentLike.findUnique({
-        where: {
-          userId_commentId: {
-            userId: context.currentUser.id,
-            commentId: args.commentId,
-          },
-        },
-      });
-
-      let liked = false;
-      if (existing) {
-        await context.prisma.commentLike.delete({ where: { id: existing.id } });
-        liked = false;
-      } else {
-        await context.prisma.commentLike.create({
-          data: {
-            userId: context.currentUser.id,
-            commentId: args.commentId,
-          },
-        });
-        liked = true;
+    votePoll: async (
+      _parent: unknown,
+      args: { pollId: string; optionId: string },
+      context: GraphQLContext
+    ) => {
+      if (!context.currentUser) {
+        throw new Error('Authentication required.');
       }
+      return await PostService.votePoll(
+        context.currentUser.id,
+        args.pollId,
+        args.optionId
+      );
+    },
 
-      const likeCount = await context.prisma.commentLike.count({
-        where: { commentId: args.commentId },
-      });
+    togglePollStatus: async (
+      _parent: unknown,
+      args: { pollId: string },
+      context: GraphQLContext
+    ) => {
+      if (!context.currentUser) {
+        throw new Error('Authentication required.');
+      }
+      return await PostService.togglePollStatus(
+        context.currentUser.id,
+        context.currentUser.role,
+        args.pollId
+      );
+    },
 
-      return { liked, likeCount };
+    updatePoll: async (
+      _parent: unknown,
+      args: { id: string; input: any },
+      context: GraphQLContext
+    ) => {
+      if (!context.currentUser) {
+        throw new Error('Authentication required.');
+      }
+      return await PostService.updatePoll(
+        context.currentUser.id,
+        context.currentUser.role,
+        args.id,
+        args.input
+      );
+    },
+
+    deletePoll: async (
+      _parent: unknown,
+      args: { id: string },
+      context: GraphQLContext
+    ) => {
+      if (!context.currentUser) {
+        throw new Error('Authentication required.');
+      }
+      return await PostService.deletePoll(
+        context.currentUser.id,
+        context.currentUser.role,
+        args.id
+      );
     },
 
     deletePost: async (
@@ -712,7 +793,35 @@ export const postResolvers = {
     },
     postType: (post: any) => {
       const pt = String(post.postType || 'CASUAL').toUpperCase();
-      return ['CASUAL', 'RECIPE', 'REPOST'].includes(pt) ? pt : 'CASUAL';
+      return ['CASUAL', 'RECIPE', 'REPOST', 'POLL'].includes(pt) ? pt : 'CASUAL';
+    },
+    poll: async (post: any, _args: unknown, context: GraphQLContext) => {
+      if (post.poll && post.poll.options) {
+        return PostService.formatPoll(
+          post.poll,
+          context.currentUser?.id,
+          post.authorId
+        );
+      }
+      const poll = await (context.prisma as any).poll.findUnique({
+        where: { postId: post.id },
+        include: {
+          post: { select: { authorId: true } },
+          options: {
+            include: {
+              votes: {
+                include: {
+                  user: {
+                    select: { id: true, name: true, image: true, role: true },
+                  },
+                },
+              },
+            },
+            orderBy: { createdAt: 'asc' },
+          },
+        },
+      });
+      return PostService.formatPoll(poll, context.currentUser?.id, post.authorId);
     },
     status: (post: any) => post.status || 'PUBLISHED',
     images: (post: any) =>
@@ -820,7 +929,35 @@ export const postResolvers = {
     isCommentDisabled: (post: any) => Boolean(post.isCommentDisabled),
     postType: (post: any) => {
       const pt = String(post.postType || 'CASUAL').toUpperCase();
-      return ['CASUAL', 'RECIPE', 'REPOST'].includes(pt) ? pt : 'CASUAL';
+      return ['CASUAL', 'RECIPE', 'REPOST', 'POLL'].includes(pt) ? pt : 'CASUAL';
+    },
+    poll: async (post: any, _args: unknown, context: GraphQLContext) => {
+      if (post.poll && post.poll.options) {
+        return PostService.formatPoll(
+          post.poll,
+          context.currentUser?.id,
+          post.authorId
+        );
+      }
+      const poll = await (context.prisma as any).poll.findUnique({
+        where: { postId: post.id },
+        include: {
+          post: { select: { authorId: true } },
+          options: {
+            include: {
+              votes: {
+                include: {
+                  user: {
+                    select: { id: true, name: true, image: true, role: true },
+                  },
+                },
+              },
+            },
+            orderBy: { createdAt: 'asc' },
+          },
+        },
+      });
+      return PostService.formatPoll(poll, context.currentUser?.id, post.authorId);
     },
     images: (post: any) =>
       Array.isArray(post.images) && post.images.length > 0

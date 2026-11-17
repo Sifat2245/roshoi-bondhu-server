@@ -3,6 +3,7 @@ export const postTypeDefs = /* GraphQL */ `
     CASUAL
     RECIPE
     REPOST
+    POLL
   }
 
   enum PostAudience {
@@ -61,6 +62,30 @@ export const postTypeDefs = /* GraphQL */ `
     updatedAt: String
   }
 
+  type PollOption {
+    id: ID!
+    pollId: ID!
+    text: String!
+    voteCount: Int!
+    voterIds: [String!]!
+    hasVoted: Boolean
+    voters: [PostAuthor!]
+  }
+
+  type Poll {
+    id: ID!
+    postId: ID!
+    authorId: String
+    question: String!
+    multiple: Boolean!
+    closed: Boolean!
+    expiresAt: String
+    totalVotes: Int!
+    options: [PollOption!]!
+    createdAt: String!
+    updatedAt: String
+  }
+
   type OriginalPost {
     id: ID!
     authorId: String!
@@ -76,6 +101,7 @@ export const postTypeDefs = /* GraphQL */ `
     ingredients: [String!]
     instructions: [String!]
     isCommentDisabled: Boolean
+    poll: Poll
     createdAt: String
   }
 
@@ -100,6 +126,7 @@ export const postTypeDefs = /* GraphQL */ `
     categories: [String!]
     originalPostId: String
     originalPost: OriginalPost
+    poll: Poll
     likeCount: Int
     commentCount: Int
     repostCount: Int
@@ -133,6 +160,21 @@ export const postTypeDefs = /* GraphQL */ `
     id: ID!
   }
 
+  input CreatePollInput {
+    question: String!
+    options: [String!]!
+    multiple: Boolean
+    expiresAt: String
+  }
+
+  input UpdatePollInput {
+    question: String
+    options: [String!]
+    multiple: Boolean
+    closed: Boolean
+    expiresAt: String
+  }
+
   input CreatePostInput {
     postType: PostType
     audience: PostAudience
@@ -147,11 +189,21 @@ export const postTypeDefs = /* GraphQL */ `
     cuisine: String
     categories: [String!]
     groupId: ID
+    poll: CreatePollInput
   }
 
   input UpdatePostInput {
     caption: String
     title: String
+    audience: PostAudience
+    image: String
+    images: [String!]
+    ingredients: [String!]
+    instructions: [String!]
+    preparationTime: Int
+    servings: Int
+    cuisine: String
+    poll: UpdatePollInput
   }
 
   type Query {
@@ -184,6 +236,10 @@ export const postTypeDefs = /* GraphQL */ `
     createComment(postId: ID!, content: String!, parentId: ID): PostComment!
     updateComment(id: ID!, content: String!): PostComment!
     deleteComment(id: ID!): Boolean!
+    votePoll(pollId: ID!, optionId: ID!): Poll!
+    togglePollStatus(pollId: ID!): Poll!
+    updatePoll(id: ID!, input: UpdatePollInput!): Poll!
+    deletePoll(id: ID!): Boolean!
     deletePost(postId: ID!): DeleteResult!
     restorePost(postId: ID!): Post!
     permanentDeletePost(postId: ID!): DeleteResult!

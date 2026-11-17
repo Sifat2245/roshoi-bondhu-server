@@ -2,6 +2,8 @@ import prisma from '../../lib/prisma.js';
 import { paginationUtils } from '../../shared/pagination/pagination.js';
 import { FriendsService } from '../friends/friends.service.js';
 
+const db = prisma as any;
+
 interface GetFeedParams extends Record<string, unknown> {
   page?: string;
   limit?: string;
@@ -22,7 +24,7 @@ const getFeed = async (query: GetFeedParams, currentUserId?: string) => {
     deletedAt: null,
   };
 
-  if (type && ['CASUAL', 'RECIPE', 'REPOST'].includes(type.toUpperCase())) {
+  if (type && ['CASUAL', 'RECIPE', 'REPOST', 'POLL'].includes(type.toUpperCase())) {
     where.postType = type.toUpperCase();
   }
 
@@ -174,6 +176,21 @@ const getFeed = async (query: GetFeedParams, currentUserId?: string) => {
               select: { id: true },
             }
           : false,
+        poll: {
+          include: {
+            post: { select: { authorId: true } },
+            options: {
+              include: {
+                votes: {
+                  include: {
+                    user: { select: { id: true, name: true, image: true, role: true } },
+                  },
+                },
+              },
+              orderBy: { createdAt: 'asc' },
+            },
+          },
+        },
       },
     }),
     prisma.post.count({ where }),
@@ -237,6 +254,15 @@ const getPostById = async (id: string, currentUserId?: string) => {
               image: true,
             },
           },
+          _count: {
+            select: { likes: true },
+          },
+          likes: currentUserId
+            ? {
+                where: { userId: currentUserId },
+                select: { id: true },
+              }
+            : false,
           replies: {
             include: {
               user: {
@@ -244,6 +270,30 @@ const getPostById = async (id: string, currentUserId?: string) => {
                   id: true,
                   name: true,
                   image: true,
+                },
+              },
+              _count: {
+                select: { likes: true },
+              },
+              likes: currentUserId
+                ? {
+                    where: { userId: currentUserId },
+                    select: { id: true },
+                  }
+                : false,
+            },
+            orderBy: { createdAt: 'asc' },
+          },
+        },
+      },
+      poll: {
+        include: {
+          post: { select: { authorId: true } },
+          options: {
+            include: {
+              votes: {
+                include: {
+                  user: { select: { id: true, name: true, image: true, role: true } },
                 },
               },
             },
@@ -371,7 +421,34 @@ const createPost = async (authorId: string, postData: any, userRole: string) => 
     throw new Error('Recipe title, ingredients, and step instructions are required.');
   }
 
-  const newPost = await prisma.post.create({
+  const pollData = postData.poll;
+  let cleanPollQuestion = '';
+  let cleanPollOptions: string[] = [];
+
+  if (postType === 'POLL' || pollData) {
+    if (!pollData || !pollData.question || !Array.isArray(pollData.options)) {
+      throw new Error('Poll question and answers are required.');
+    }
+    cleanPollQuestion = pollData.question.trim();
+    cleanPollOptions = pollData.options
+      .map((o: any) => (typeof o === 'string' ? o.trim() : ''))
+      .filter(Boolean);
+
+    if (cleanPollQuestion.length < 8 || cleanPollQuestion.length > 200) {
+      throw new Error('Write a question between 8 and 200 characters.');
+    }
+    if (cleanPollOptions.length < 2 || cleanPollOptions.length > 6) {
+      throw new Error('Add between two and six answers.');
+    }
+    if (
+      new Set(cleanPollOptions.map((o: string) => o.toLowerCase())).size !==
+      cleanPollOptions.length
+    ) {
+      throw new Error('Each answer needs to be different.');
+    }
+  }
+
+  const newPost = await db.post.create({
     data: {
       authorId,
       groupId: groupId || null,
@@ -388,6 +465,23 @@ const createPost = async (authorId: string, postData: any, userRole: string) => 
       servings: servings ? parseInt(servings) : null,
       cuisine: cuisine || null,
       categories: Array.isArray(categories) ? categories : [],
+      poll:
+        (postType === 'POLL' || pollData) &&
+        cleanPollQuestion &&
+        cleanPollOptions.length >= 2
+          ? {
+              create: {
+                question: cleanPollQuestion,
+                multiple: Boolean(pollData?.multiple),
+                expiresAt: pollData?.expiresAt
+                  ? new Date(pollData.expiresAt)
+                  : null,
+                options: {
+                  create: cleanPollOptions.map((text: string) => ({ text })),
+                },
+              },
+            }
+          : undefined,
     },
     include: {
       author: {
@@ -395,6 +489,21 @@ const createPost = async (authorId: string, postData: any, userRole: string) => 
       },
       group: {
         select: { id: true, name: true, slug: true },
+      },
+      poll: {
+        include: {
+          post: { select: { authorId: true } },
+          options: {
+            include: {
+              votes: {
+                include: {
+                  user: { select: { id: true, name: true, image: true, role: true } },
+                },
+              },
+            },
+            orderBy: { createdAt: 'asc' },
+          },
+        },
       },
     },
   });
@@ -470,6 +579,42 @@ const toggleLike = async (userId: string, postId: string) => {
   }
 
   const likeCount = await prisma.like.count({ where: { postId } });
+  return { liked, likeCount };
+};
+
+const toggleCommentLike = async (userId: string, commentId: string) => {
+  const comment = await prisma.comment.findUnique({
+    where: { id: commentId },
+  });
+  if (!comment) throw new Error('Comment not found.');
+
+  const existing = await db.commentLike.findUnique({
+    where: {
+      userId_commentId: {
+        userId,
+        commentId,
+      },
+    },
+  });
+
+  let liked = false;
+  if (existing) {
+    await db.commentLike.delete({ where: { id: existing.id } });
+    liked = false;
+  } else {
+    await db.commentLike.create({
+      data: {
+        userId,
+        commentId,
+      },
+    });
+    liked = true;
+  }
+
+  const likeCount = await db.commentLike.count({
+    where: { commentId },
+  });
+
   return { liked, likeCount };
 };
 
@@ -654,18 +799,283 @@ const emptyTrash = async (userId: string) => {
   return { count: result.count };
 };
 
+const formatPoll = (
+  poll: any,
+  currentUserId?: string,
+  fallbackAuthorId?: string
+) => {
+  if (!poll) return null;
+  let totalVotes = 0;
+  const options = (poll.options || []).map((opt: any) => {
+    const voterIds: string[] = Array.isArray(opt.voterIds)
+      ? opt.voterIds
+      : (opt.votes || []).map((v: any) => v.userId);
+    totalVotes += voterIds.length;
+    const hasVoted = currentUserId
+      ? voterIds.includes(currentUserId)
+      : typeof opt.hasVoted === 'boolean'
+      ? opt.hasVoted
+      : false;
+    const voters = Array.isArray(opt.voters)
+      ? opt.voters
+      : (opt.votes || []).map((v: any) => v.user).filter(Boolean);
+    return {
+      id: opt.id,
+      pollId: opt.pollId,
+      text: opt.text,
+      voteCount: voterIds.length,
+      voterIds,
+      hasVoted,
+      voters,
+    };
+  });
+
+  return {
+    id: poll.id,
+    postId: poll.postId,
+    authorId: poll.post?.authorId || poll.authorId || fallbackAuthorId || '',
+    question: poll.question,
+    multiple: poll.multiple,
+    closed: poll.closed,
+    expiresAt: poll.expiresAt ? poll.expiresAt.toISOString() : null,
+    totalVotes,
+    options,
+    createdAt:
+      poll.createdAt instanceof Date
+        ? poll.createdAt.toISOString()
+        : String(poll.createdAt),
+    updatedAt:
+      poll.updatedAt instanceof Date
+        ? poll.updatedAt.toISOString()
+        : poll.updatedAt
+        ? String(poll.updatedAt)
+        : null,
+  };
+};
+
+const getPollById = async (pollId: string, currentUserId?: string) => {
+  const poll = await db.poll.findUnique({
+    where: { id: pollId },
+    include: {
+      post: { select: { authorId: true } },
+      options: {
+        include: {
+          votes: {
+            include: {
+              user: {
+                select: { id: true, name: true, image: true, role: true },
+              },
+            },
+          },
+        },
+        orderBy: { createdAt: 'asc' },
+      },
+    },
+  });
+  if (!poll) return null;
+  return formatPoll(poll, currentUserId);
+};
+
+const votePoll = async (userId: string, pollId: string, optionId: string) => {
+  const poll = await db.poll.findUnique({
+    where: { id: pollId },
+    include: {
+      post: { select: { authorId: true, groupId: true } },
+      options: true,
+    },
+  });
+  if (!poll) throw new Error('Poll not found.');
+
+  const isExpired =
+    poll.expiresAt && new Date(poll.expiresAt).getTime() <= Date.now();
+  if (poll.closed || isExpired) {
+    throw new Error('Voting has ended for this poll.');
+  }
+
+  if (poll.post?.groupId) {
+    const membership = await prisma.groupMember.findFirst({
+      where: { groupId: poll.post.groupId, userId, isApproved: true },
+    });
+    if (!membership) {
+      throw new Error('You must be a member of this group to vote.');
+    }
+  }
+
+  const option = poll.options.find((o: any) => o.id === optionId);
+  if (!option) throw new Error('Option not found.');
+
+  const existingVote = await db.pollVote.findUnique({
+    where: {
+      userId_optionId: { userId, optionId },
+    },
+  });
+
+  if (existingVote) {
+    await db.pollVote.delete({ where: { id: existingVote.id } });
+  } else {
+    if (!poll.multiple) {
+      await db.pollVote.deleteMany({
+        where: {
+          userId,
+          option: { pollId: poll.id },
+        },
+      });
+    }
+    await db.pollVote.create({
+      data: { userId, optionId },
+    });
+  }
+
+  return await getPollById(pollId, userId);
+};
+
+const togglePollStatus = async (
+  userId: string,
+  userRole: string,
+  pollId: string
+) => {
+  const poll = await db.poll.findUnique({
+    where: { id: pollId },
+    include: { post: { select: { authorId: true } } },
+  });
+  if (!poll) throw new Error('Poll not found.');
+
+  const isAuthor = poll.post?.authorId === userId;
+  const isStaff = ['ADMIN', 'MODERATOR'].includes(userRole);
+  if (!isAuthor && !isStaff) {
+    throw new Error('Only the author can change the status of this poll.');
+  }
+
+  const isCurrentlyClosed =
+    poll.closed ||
+    (poll.expiresAt && new Date(poll.expiresAt).getTime() <= Date.now());
+
+  await db.poll.update({
+    where: { id: pollId },
+    data: {
+      closed: !isCurrentlyClosed,
+      expiresAt: isCurrentlyClosed ? null : poll.expiresAt,
+    },
+  });
+
+  return await getPollById(pollId, userId);
+};
+
+const updatePoll = async (
+  userId: string,
+  userRole: string,
+  pollId: string,
+  input: {
+    question?: string;
+    options?: string[];
+    multiple?: boolean;
+    closed?: boolean;
+    expiresAt?: string | null;
+  }
+) => {
+  const poll = await db.poll.findUnique({
+    where: { id: pollId },
+    include: { post: { select: { authorId: true } }, options: true },
+  });
+  if (!poll) throw new Error('Poll not found.');
+
+  const isAuthor = poll.post?.authorId === userId;
+  const isStaff = ['ADMIN', 'MODERATOR'].includes(userRole);
+  if (!isAuthor && !isStaff) {
+    throw new Error('Only the author can update this poll.');
+  }
+
+  const updateData: any = {};
+  if (input.question !== undefined) {
+    const q = input.question.trim();
+    if (q.length < 8 || q.length > 200) {
+      throw new Error('Write a question between 8 and 200 characters.');
+    }
+    updateData.question = q;
+  }
+  if (input.multiple !== undefined) {
+    updateData.multiple = Boolean(input.multiple);
+  }
+  if (input.closed !== undefined) {
+    updateData.closed = Boolean(input.closed);
+  }
+  if (input.expiresAt !== undefined) {
+    updateData.expiresAt = input.expiresAt ? new Date(input.expiresAt) : null;
+  }
+
+  if (input.options && Array.isArray(input.options)) {
+    const cleanOptions = input.options
+      .map((o) => (typeof o === 'string' ? o.trim() : ''))
+      .filter(Boolean);
+    if (cleanOptions.length < 2 || cleanOptions.length > 6) {
+      throw new Error('Add between two and six answers.');
+    }
+    if (
+      new Set(cleanOptions.map((o: string) => o.toLowerCase())).size !==
+      cleanOptions.length
+    ) {
+      throw new Error('Each answer needs to be different.');
+    }
+
+    await prisma.$transaction(async (tx: any) => {
+      await tx.poll.update({ where: { id: pollId }, data: updateData });
+      await tx.pollOption.deleteMany({ where: { pollId } });
+      await tx.pollOption.createMany({
+        data: cleanOptions.map((text) => ({ pollId, text })),
+      });
+    });
+    return await getPollById(pollId, userId);
+  }
+
+  await db.poll.update({
+    where: { id: pollId },
+    data: updateData,
+  });
+  return await getPollById(pollId, userId);
+};
+
+const deletePoll = async (userId: string, userRole: string, pollId: string) => {
+  const poll = await db.poll.findUnique({
+    where: { id: pollId },
+    include: { post: { select: { authorId: true, postType: true } } },
+  });
+  if (!poll) throw new Error('Poll not found.');
+
+  const isAuthor = poll.post?.authorId === userId;
+  const isStaff = ['ADMIN', 'MODERATOR'].includes(userRole);
+  if (!isAuthor && !isStaff) {
+    throw new Error('Only the author can delete this poll.');
+  }
+
+  await db.poll.delete({ where: { id: pollId } });
+  if (poll.post?.postType === 'POLL') {
+    await prisma.post.update({
+      where: { id: poll.postId },
+      data: { postType: 'CASUAL' },
+    });
+  }
+  return true;
+};
+
 export const PostService = {
   getFeed,
   getPostById,
   createPost,
   repostPost,
   toggleLike,
+  toggleCommentLike,
   createComment,
   deletePost,
   getTrash,
   restorePost,
   permanentDeletePost,
   emptyTrash,
+  formatPoll,
+  getPollById,
+  votePoll,
+  togglePollStatus,
+  updatePoll,
+  deletePoll,
 };
 
 export default PostService;

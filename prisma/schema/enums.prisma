@@ -26,6 +26,7 @@ enum PostType {
   CASUAL
   RECIPE
   REPOST
+  POLL
 }
 
 enum PostStatus {

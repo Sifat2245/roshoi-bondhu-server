@@ -29,6 +29,7 @@ model User {
   likes         Like[]
   commentLikes  CommentLike[]
   comments      Comment[]
+  pollVotes     PollVote[]
   createdGroups Group[]       @relation("GroupCreator")
   groupMembers  GroupMember[]
   reportsFiled  Report[]      @relation("Reporter")

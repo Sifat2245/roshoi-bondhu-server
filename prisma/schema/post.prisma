@@ -28,6 +28,7 @@ model Post {
 
   likes           Like[]
   comments        Comment[]
+  poll            Poll?
 
   isCommentDisabled Boolean   @default(false)
 
@@ -80,5 +81,44 @@ model CommentLike {
 
   @@unique([userId, commentId])
   @@index([commentId])
+}
+
+model Poll {
+  id         String       @id @default(cuid())
+  postId     String       @unique
+  post       Post         @relation(fields: [postId], references: [id], onDelete: Cascade)
+  question   String
+  multiple   Boolean      @default(false)
+  closed     Boolean      @default(false)
+  expiresAt  DateTime?
+  options    PollOption[]
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
+
+  @@index([postId])
+}
+
+model PollOption {
+  id        String     @id @default(cuid())
+  pollId    String
+  poll      Poll       @relation(fields: [pollId], references: [id], onDelete: Cascade)
+  text      String
+  votes     PollVote[]
+  createdAt DateTime   @default(now())
+
+  @@index([pollId])
+}
+
+model PollVote {
+  id        String     @id @default(cuid())
+  userId    String
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  optionId  String
+  option    PollOption @relation(fields: [optionId], references: [id], onDelete: Cascade)
+  createdAt DateTime   @default(now())
+
+  @@unique([userId, optionId])
+  @@index([optionId])
+  @@index([userId])
 }
 
