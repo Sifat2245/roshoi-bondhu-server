@@ -45,10 +45,8 @@ export const searchTypeDefs = /* GraphQL */ `
     city: String
     work: String
     education: String
-    followersCount: Int
     mutualFriendsCount: Int
     friendshipStatus: String
-    isFollowing: Boolean
     isMe: Boolean
   }
 

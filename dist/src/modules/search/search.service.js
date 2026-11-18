@@ -174,7 +174,7 @@ export class SearchService {
         if (!q) {
             return { users: [], groups: [] };
         }
-        const [matchingUsers, matchingGroups, friendIdsSet, follows] = await Promise.all([
+        const [matchingUsers, matchingGroups, friendIdsSet] = await Promise.all([
             prisma.user.findMany({
                 where: {
                     OR: [
@@ -197,11 +197,6 @@ export class SearchService {
                             city: true,
                             work: true,
                             education: true,
-                        },
-                    },
-                    _count: {
-                        select: {
-                            followers: true,
                         },
                     },
                 },
@@ -233,14 +228,7 @@ export class SearchService {
             currentUserId
                 ? FriendsService.getFriendIdsForUser(currentUserId)
                 : Promise.resolve(new Set()),
-            currentUserId
-                ? prisma.follow.findMany({
-                    where: { followerId: currentUserId },
-                    select: { followingId: true },
-                })
-                : Promise.resolve([]),
         ]);
-        const followingSet = new Set(follows.map((f) => f.followingId));
         let mutualCountsMap = null;
         if (currentUserId && friendIdsSet.size > 0) {
             mutualCountsMap = await FriendsService.getMutualCountsMap(friendIdsSet, currentUserId);
@@ -248,7 +236,6 @@ export class SearchService {
         const users = matchingUsers.map((u) => {
             const isMe = currentUserId ? u.id === currentUserId : false;
             const isFriend = currentUserId ? friendIdsSet.has(u.id) : false;
-            const isFollowing = currentUserId ? followingSet.has(u.id) : false;
             const mutualFriendsCount = currentUserId && mutualCountsMap ? mutualCountsMap.get(u.id) || 0 : 0;
             return {
                 id: u.id,
@@ -261,10 +248,8 @@ export class SearchService {
                 city: u.profile?.city || null,
                 work: u.profile?.work || null,
                 education: u.profile?.education || null,
-                followersCount: u._count.followers,
                 mutualFriendsCount,
                 friendshipStatus: isFriend ? 'FRIENDS' : 'NONE',
-                isFollowing,
                 isMe,
             };
         });
@@ -309,7 +294,7 @@ export class SearchService {
             blockedIds = blocks.map((b) => b.blockerId === currentUserId ? b.blockedId : b.blockerId);
         }
         // 2. Fetch Users
-        const [matchingUsers, matchingGroups, friendIdsSet, follows, memberships] = await Promise.all([
+        const [matchingUsers, matchingGroups, friendIdsSet, memberships] = await Promise.all([
             prisma.user.findMany({
                 where: {
                     AND: [
@@ -339,11 +324,6 @@ export class SearchService {
                             city: true,
                             work: true,
                             education: true,
-                        },
-                    },
-                    _count: {
-                        select: {
-                            followers: true,
                         },
                     },
                 },
@@ -382,19 +362,12 @@ export class SearchService {
                 ? FriendsService.getFriendIdsForUser(currentUserId)
                 : Promise.resolve(new Set()),
             currentUserId
-                ? prisma.follow.findMany({
-                    where: { followerId: currentUserId },
-                    select: { followingId: true },
-                })
-                : Promise.resolve([]),
-            currentUserId
                 ? prisma.groupMember.findMany({
                     where: { userId: currentUserId, isApproved: true },
                     select: { groupId: true },
                 })
                 : Promise.resolve([]),
         ]);
-        const followingSet = new Set(follows.map((f) => f.followingId));
         const friendIds = Array.from(friendIdsSet);
         const myGroupIds = memberships.map((m) => m.groupId);
         let mutualCountsMap = null;
@@ -404,7 +377,6 @@ export class SearchService {
         const users = matchingUsers.map((u) => {
             const isMe = currentUserId ? u.id === currentUserId : false;
             const isFriend = currentUserId ? friendIdsSet.has(u.id) : false;
-            const isFollowing = currentUserId ? followingSet.has(u.id) : false;
             const mutualFriendsCount = currentUserId && mutualCountsMap ? mutualCountsMap.get(u.id) || 0 : 0;
             return {
                 id: u.id,
@@ -417,10 +389,8 @@ export class SearchService {
                 city: u.profile?.city || null,
                 work: u.profile?.work || null,
                 education: u.profile?.education || null,
-                followersCount: u._count.followers,
                 mutualFriendsCount,
                 friendshipStatus: isFriend ? 'FRIENDS' : 'NONE',
-                isFollowing,
                 isMe,
             };
         });
