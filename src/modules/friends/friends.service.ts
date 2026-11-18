@@ -289,7 +289,11 @@ export class FriendsService {
       }),
       prisma.user.findUnique({
         where: { id: userId },
-        select: { profile: { select: { city: true } } },
+        select: {
+          profile: {
+            select: { city: true, work: true, education: true },
+          },
+        },
       }),
     ]);
 
@@ -304,6 +308,8 @@ export class FriendsService {
     });
 
     const myCity = myUser?.profile?.city?.trim().toLowerCase();
+    const myWork = myUser?.profile?.work?.trim().toLowerCase();
+    const myEducation = myUser?.profile?.education?.trim().toLowerCase();
 
     // Query candidates and compute mutual friend counts concurrently
     const [candidates, mutualCounts] = await Promise.all([
@@ -322,6 +328,7 @@ export class FriendsService {
               username: true,
               city: true,
               work: true,
+              education: true,
               bio: true,
             },
           },
@@ -334,17 +341,35 @@ export class FriendsService {
     const scored = candidates.map((candidate) => {
       const mutualCount = mutualCounts.get(candidate.id) || 0;
       const candidateCity = candidate.profile?.city?.trim().toLowerCase();
+      const candidateWork = candidate.profile?.work?.trim().toLowerCase();
+      const candidateEducation = candidate.profile?.education?.trim().toLowerCase();
+
       const sameCity = Boolean(
         myCity && candidateCity && (myCity.includes(candidateCity) || candidateCity.includes(myCity))
       );
+      const sameWork = Boolean(
+        myWork && candidateWork && (myWork.includes(candidateWork) || candidateWork.includes(myWork))
+      );
+      const sameEducation = Boolean(
+        myEducation && candidateEducation && (myEducation.includes(candidateEducation) || candidateEducation.includes(myEducation))
+      );
 
       // Facebook PYMK Scoring:
-      // High weight on mutual friends, bonus for same city, slight bonus for complete profile/photo
-      const score = mutualCount * 100 + (sameCity ? 15 : 0) + (candidate.image ? 5 : 0);
+      // High weight on mutual friends, bonuses for same city, education, workplace, and profile photo
+      const score =
+        mutualCount * 100 +
+        (sameCity ? 25 : 0) +
+        (sameEducation ? 20 : 0) +
+        (sameWork ? 15 : 0) +
+        (candidate.image ? 5 : 0);
 
       let reason = 'Suggested for you';
       if (mutualCount > 0) {
         reason = `${mutualCount} mutual ${mutualCount === 1 ? 'friend' : 'friends'}`;
+      } else if (sameEducation && candidate.profile?.education) {
+        reason = `Studied at ${candidate.profile.education}`;
+      } else if (sameWork && candidate.profile?.work) {
+        reason = `Works at ${candidate.profile.work}`;
       } else if (sameCity && candidate.profile?.city) {
         reason = `Lives in ${candidate.profile.city}`;
       }
@@ -356,6 +381,7 @@ export class FriendsService {
         image: candidate.image || null,
         city: candidate.profile?.city || null,
         work: candidate.profile?.work || null,
+        education: candidate.profile?.education || null,
         bio: candidate.profile?.bio || null,
         mutualFriends: mutualCount,
         reason,

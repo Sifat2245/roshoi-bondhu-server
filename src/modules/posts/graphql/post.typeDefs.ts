@@ -244,6 +244,8 @@ export const postTypeDefs = /* GraphQL */ `
     restorePost(postId: ID!): Post!
     permanentDeletePost(postId: ID!): DeleteResult!
     emptyTrash: Boolean!
+    hidePost(postId: ID!): Boolean!
+    unhidePost(postId: ID!): Boolean!
   }
 `;
 

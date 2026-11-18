@@ -29,6 +29,7 @@ model Post {
   likes           Like[]
   comments        Comment[]
   poll            Poll?
+  hiddenBy        UserHiddenPost[]
 
   isCommentDisabled Boolean   @default(false)
 
@@ -40,6 +41,8 @@ model Post {
   @@index([groupId])
   @@index([audience])
   @@index([deletedAt])
+  @@index([createdAt])
+  @@index([deletedAt, createdAt])
 }
 
 model Like {
@@ -120,5 +123,19 @@ model PollVote {
   @@unique([userId, optionId])
   @@index([optionId])
   @@index([userId])
+}
+
+model UserHiddenPost {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  postId    String
+  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([userId, postId])
+  @@index([userId])
+  @@index([postId])
+  @@map("user_hidden_posts")
 }
 

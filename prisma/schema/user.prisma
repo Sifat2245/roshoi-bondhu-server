@@ -49,6 +49,7 @@ model User {
   friendshipsAsHigh      Friendship[]        @relation("FriendshipsHigh")
   blocksIssued           UserBlock[]         @relation("BlocksIssued")
   blocksReceived         UserBlock[]         @relation("BlocksReceived")
+  hiddenPosts            UserHiddenPost[]
 }
 
 model Session {

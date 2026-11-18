@@ -93,13 +93,62 @@ export const postResolvers = {
         ];
       }
 
-      if (filter === 'FOLLOWING' && currentUserId) {
-        const followingUsers = await context.prisma.follow.findMany({
-          where: { followerId: currentUserId },
-          select: { followingId: true },
-        });
-        const followingIds = followingUsers.map((f) => f.followingId);
-        where.authorId = { in: [...followingIds, currentUserId] };
+      const myUser = currentUserId
+        ? await context.prisma.user.findUnique({
+            where: { id: currentUserId },
+            select: {
+              profile: {
+                select: { city: true, work: true, education: true },
+              },
+            },
+          })
+        : null;
+
+      const myCity = myUser?.profile?.city?.trim().toLowerCase();
+      const myWork = myUser?.profile?.work?.trim().toLowerCase();
+      const myEducation = myUser?.profile?.education?.trim().toLowerCase();
+
+      let friendIdsSet = new Set<string>();
+      let followingIds: string[] = [];
+      let myGroupIds: string[] = [];
+      let mutualCountsMap: Map<string, number> | null = null;
+
+      if (currentUserId) {
+        const [friendsSet, follows, memberships] = await Promise.all([
+          FriendsService.getFriendIdsForUser(currentUserId),
+          context.prisma.follow.findMany({
+            where: { followerId: currentUserId },
+            select: { followingId: true },
+          }),
+          context.prisma.groupMember.findMany({
+            where: { userId: currentUserId, isApproved: true },
+            select: { groupId: true },
+          }),
+        ]);
+
+        friendIdsSet = friendsSet;
+        followingIds = follows.map((f) => f.followingId);
+        myGroupIds = memberships.map((m) => m.groupId);
+
+        if (friendIdsSet.size > 0) {
+          mutualCountsMap = await FriendsService.getMutualCountsMap(
+            friendIdsSet,
+            currentUserId
+          );
+        }
+      }
+
+      // Explicit Filters handling
+      const upperFilter = (filter || '').toUpperCase();
+      if ((upperFilter === 'FRIENDS' || upperFilter === 'FOLLOWING') && currentUserId) {
+        const allowedAuthorIds = Array.from(
+          new Set([...friendIdsSet, ...followingIds, currentUserId])
+        );
+        where.authorId = { in: allowedAuthorIds };
+      } else if (upperFilter === 'RECIPES') {
+        where.postType = 'RECIPE';
+      } else if (upperFilter === 'GROUPS' && currentUserId) {
+        where.groupId = { in: myGroupIds };
       }
 
       // Filter out blocked/blocking users
@@ -133,9 +182,24 @@ export const postResolvers = {
         }
       }
 
-      // Audience & Privacy Filters
+      // Filter out posts hidden by the viewer
       if (currentUserId) {
-        const friendIdsSet = await FriendsService.getFriendIdsForUser(currentUserId);
+        const hidden = await context.prisma.userHiddenPost.findMany({
+          where: { userId: currentUserId },
+          select: { postId: true },
+        });
+        if (hidden.length > 0) {
+          const hiddenPostIds = hidden.map((h) => h.postId);
+          if (where.id && typeof where.id === 'object' && where.id.notIn) {
+            where.id.notIn = [...where.id.notIn, ...hiddenPostIds];
+          } else {
+            where.id = { notIn: hiddenPostIds };
+          }
+        }
+      }
+
+      // Audience & Candidate Sourcing Filters
+      if (currentUserId) {
         const friendIds = Array.from(friendIdsSet);
 
         if (authorId) {
@@ -143,17 +207,74 @@ export const postResolvers = {
             const isFriend = friendIdsSet.has(authorId);
             where.audience = isFriend ? { in: ['PUBLIC', 'FRIENDS'] } : 'PUBLIC';
           }
-        } else {
-          const audienceOr: any[] = [
+        } else if (upperFilter === 'FRIENDS' || upperFilter === 'FOLLOWING') {
+          where.OR = [
             { authorId: currentUserId },
             { audience: 'PUBLIC' },
+            { audience: 'FRIENDS', authorId: { in: friendIds } },
           ];
+        } else {
+          // Default Smart Candidate Sourcing:
+          // 1. Own posts
+          // 2. Friends' posts (Public & Friends)
+          // 3. Followed accounts' public posts
+          // 4. Posts from joined groups
+          // 5. Public recipes from any user
+          // 6. Public posts from strangers ONLY if they have engagement or match location/education/work
+          const audienceOr: any[] = [
+            { authorId: currentUserId },
+            { postType: 'RECIPE', audience: 'PUBLIC' },
+          ];
+
           if (friendIds.length > 0) {
             audienceOr.push({
               audience: 'FRIENDS',
               authorId: { in: friendIds },
             });
+            audienceOr.push({
+              audience: 'PUBLIC',
+              authorId: { in: friendIds },
+            });
           }
+
+          if (followingIds.length > 0) {
+            audienceOr.push({
+              audience: 'PUBLIC',
+              authorId: { in: followingIds },
+            });
+          }
+
+          if (myGroupIds.length > 0) {
+            audienceOr.push({
+              groupId: { in: myGroupIds },
+            });
+          }
+
+          // Engaging or contextually-matched public posts from the community
+          const discoveryConditions: any[] = [
+            { likes: { some: {} } },
+            { comments: { some: {} } },
+          ];
+          if (myCity) {
+            discoveryConditions.push({
+              author: { profile: { city: { contains: myCity, mode: 'insensitive' } } },
+            });
+          }
+          if (myEducation) {
+            discoveryConditions.push({
+              author: { profile: { education: { contains: myEducation, mode: 'insensitive' } } },
+            });
+          }
+          if (myWork) {
+            discoveryConditions.push({
+              author: { profile: { work: { contains: myWork, mode: 'insensitive' } } },
+            });
+          }
+
+          audienceOr.push({
+            audience: 'PUBLIC',
+            OR: discoveryConditions,
+          });
 
           if (where.OR) {
             where.AND = [{ OR: where.OR }, { OR: audienceOr }];
@@ -204,76 +325,173 @@ export const postResolvers = {
         }
       }
 
-      const posts = await context.prisma.post.findMany({
-        where,
-        take: limit + 1,
-        ...(cursorObj ? { cursor: cursorObj, skip: 1 } : {}),
-        orderBy: { createdAt: 'desc' },
-        include: {
-          author: {
-            select: {
-              id: true,
-              name: true,
-              email: true,
-              image: true,
-              role: true,
-              bio: true,
-            },
-          },
-          group: {
-            select: {
-              id: true,
-              name: true,
-              slug: true,
-              avatar: true,
-              privacy: true,
-            },
-          },
-          originalPost: {
-            include: {
-              author: {
-                select: {
-                  id: true,
-                  name: true,
-                  image: true,
-                  role: true,
-                },
-              },
-            },
-          },
-          _count: {
-            select: {
-              likes: true,
-              comments: true,
-              reposts: true,
-            },
-          },
-          likes: currentUserId
-            ? {
-                where: { userId: currentUserId },
-                select: { id: true },
-              }
-            : false,
-          poll: {
-            include: {
-              post: { select: { authorId: true } },
-              options: {
-                include: {
-                  votes: {
-                    include: {
-                      user: { select: { id: true, name: true, image: true, role: true } },
-                    },
-                  },
-                },
-                orderBy: { createdAt: 'asc' },
+      const postInclude = {
+        author: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            image: true,
+            role: true,
+            bio: true,
+            profile: {
+              select: {
+                city: true,
+                work: true,
+                education: true,
               },
             },
           },
         },
-      });
+        group: {
+          select: {
+            id: true,
+            name: true,
+            slug: true,
+            avatar: true,
+            privacy: true,
+          },
+        },
+        originalPost: {
+          include: {
+            author: {
+              select: {
+                id: true,
+                name: true,
+                image: true,
+                role: true,
+              },
+            },
+          },
+        },
+        _count: {
+          select: {
+            likes: true,
+            comments: true,
+            reposts: true,
+          },
+        },
+        likes: currentUserId
+          ? {
+              where: { userId: currentUserId },
+              select: { id: true },
+            }
+          : false,
+        poll: {
+          include: {
+            post: { select: { authorId: true } },
+            options: {
+              include: {
+                votes: {
+                  include: {
+                    user: { select: { id: true, name: true, image: true, role: true } },
+                  },
+                },
+              },
+              orderBy: { createdAt: 'asc' as const },
+            },
+          },
+        },
+      };
 
-      const hasNextPage = posts.length > limit;
-      const nodes = hasNextPage ? posts.slice(0, limit) : posts;
+      const isRankedFeed = !authorId && !groupId && (!upperFilter || upperFilter === 'ALL');
+
+      let nodes: any[] = [];
+      let hasNextPage = false;
+
+      if (isRankedFeed) {
+        // Facebook-style Candidate Scoring & Ranking
+        const candidateLimit = 200;
+        const candidates = await context.prisma.post.findMany({
+          where,
+          take: candidateLimit,
+          orderBy: { createdAt: 'desc' },
+          include: postInclude,
+        });
+
+        const scoredCandidates = candidates.map((post: any) => {
+          const authorProfile = post.author?.profile;
+          const authorCity = authorProfile?.city?.trim().toLowerCase();
+          const authorWork = authorProfile?.work?.trim().toLowerCase();
+          const authorEdu = authorProfile?.education?.trim().toLowerCase();
+
+          const isAuthorSelf = currentUserId ? post.authorId === currentUserId : false;
+          const isFriend = currentUserId ? friendIdsSet.has(post.authorId) : false;
+          const isFollowing = currentUserId ? followingIds.includes(post.authorId) : false;
+          const isJoinedGroup = currentUserId && post.groupId ? myGroupIds.includes(post.groupId) : false;
+          const isRecipe = post.postType === 'RECIPE';
+          const likeCount = post._count?.likes ?? 0;
+          const commentCount = post._count?.comments ?? 0;
+          const repostCount = post._count?.reposts ?? 0;
+          const mutualFriends =
+            currentUserId && mutualCountsMap ? mutualCountsMap.get(post.authorId) || 0 : 0;
+
+          const sameCity = Boolean(
+            myCity && authorCity && (authorCity.includes(myCity) || myCity.includes(authorCity))
+          );
+          const sameEducation = Boolean(
+            myEducation && authorEdu && (authorEdu.includes(myEducation) || myEducation.includes(authorEdu))
+          );
+          const sameWork = Boolean(
+            myWork && authorWork && (authorWork.includes(myWork) || myWork.includes(authorWork))
+          );
+
+          const ageHours = Math.max(
+            0,
+            (Date.now() - new Date(post.createdAt).getTime()) / (1000 * 60 * 60)
+          );
+          const timeDecay = Math.min(ageHours * 2.5, 400);
+
+          const score =
+            (isAuthorSelf ? 1200 : 0) +
+            (isFriend ? 1000 : 0) +
+            (isJoinedGroup ? 600 : 0) +
+            (isFollowing ? 400 : 0) +
+            (isRecipe ? 80 : 0) +
+            likeCount * 4 +
+            commentCount * 8 +
+            repostCount * 12 +
+            mutualFriends * 30 +
+            (sameCity ? 35 : 0) +
+            (sameEducation ? 25 : 0) +
+            (sameWork ? 20 : 0) -
+            timeDecay;
+
+          return { post, score };
+        });
+
+        scoredCandidates.sort((a, b) => {
+          if (b.score !== a.score) {
+            return b.score - a.score;
+          }
+          return new Date(b.post.createdAt).getTime() - new Date(a.post.createdAt).getTime();
+        });
+
+        let startIndex = 0;
+        if (after) {
+          const decodedId = fromBase64(after);
+          const cursorIndex = scoredCandidates.findIndex((item) => item.post.id === decodedId);
+          if (cursorIndex >= 0) {
+            startIndex = cursorIndex + 1;
+          }
+        }
+
+        const paged = scoredCandidates.slice(startIndex, startIndex + limit);
+        hasNextPage = startIndex + limit < scoredCandidates.length;
+        nodes = paged.map((item) => item.post);
+      } else {
+        // Pure Chronological Stream for explicit filters (Friends, Groups, Profile, etc.)
+        const posts = await context.prisma.post.findMany({
+          where,
+          take: limit + 1,
+          ...(cursorObj ? { cursor: cursorObj, skip: 1 } : {}),
+          orderBy: { createdAt: 'desc' },
+          include: postInclude,
+        });
+
+        hasNextPage = posts.length > limit;
+        nodes = hasNextPage ? posts.slice(0, limit) : posts;
+      }
 
       const edges = nodes.map((post: any) => ({
         cursor: toBase64(post.id),
@@ -782,6 +1000,47 @@ export const postResolvers = {
         throw new Error('Authentication required.');
       }
       await PostService.emptyTrash(context.currentUser.id);
+      return true;
+    },
+
+    hidePost: async (
+      _parent: unknown,
+      args: { postId: string },
+      context: GraphQLContext
+    ) => {
+      if (!context.currentUser) {
+        throw new Error('Authentication required.');
+      }
+      await context.prisma.userHiddenPost.upsert({
+        where: {
+          userId_postId: {
+            userId: context.currentUser.id,
+            postId: args.postId,
+          },
+        },
+        create: {
+          userId: context.currentUser.id,
+          postId: args.postId,
+        },
+        update: {},
+      });
+      return true;
+    },
+
+    unhidePost: async (
+      _parent: unknown,
+      args: { postId: string },
+      context: GraphQLContext
+    ) => {
+      if (!context.currentUser) {
+        throw new Error('Authentication required.');
+      }
+      await context.prisma.userHiddenPost.deleteMany({
+        where: {
+          userId: context.currentUser.id,
+          postId: args.postId,
+        },
+      });
       return true;
     },
   },
