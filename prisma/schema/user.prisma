@@ -50,6 +50,7 @@ model User {
   blocksIssued           UserBlock[]         @relation("BlocksIssued")
   blocksReceived         UserBlock[]         @relation("BlocksReceived")
   hiddenPosts            UserHiddenPost[]
+  recentSearches         RecentSearch[]
 }
 
 model Session {
