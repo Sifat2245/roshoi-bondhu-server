@@ -11,10 +11,29 @@ import { groupTypeDefs } from '../modules/groups/graphql/group.typeDefs.js';
 import { groupResolvers } from '../modules/groups/graphql/group.resolvers.js';
 import { searchTypeDefs } from '../modules/search/graphql/search.typeDefs.js';
 import { searchResolvers } from '../modules/search/graphql/search.resolvers.js';
+import { reportTypeDefs } from '../modules/admin/graphql/report.typeDefs.js';
+import { reportResolvers } from '../modules/admin/graphql/report.resolvers.js';
 
 export const schema = createSchema({
-  typeDefs: [healthTypeDefs, userTypeDefs, postTypeDefs, friendsTypeDefs, groupTypeDefs, searchTypeDefs],
-  resolvers: [healthResolvers, userResolvers, postResolvers, friendsResolvers, groupResolvers, searchResolvers],
+  typeDefs: [
+    healthTypeDefs,
+    userTypeDefs,
+    postTypeDefs,
+    friendsTypeDefs,
+    groupTypeDefs,
+    searchTypeDefs,
+    reportTypeDefs,
+  ],
+  resolvers: [
+    healthResolvers,
+    userResolvers,
+    postResolvers,
+    friendsResolvers,
+    groupResolvers,
+    searchResolvers,
+    reportResolvers,
+  ],
 });
 
 export default schema;
+
