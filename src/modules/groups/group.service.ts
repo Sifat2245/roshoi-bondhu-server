@@ -43,9 +43,18 @@ const createGroup = async (userId: string, data: CreateGroupInput) => {
       },
     },
     include: {
+      createdBy: {
+        select: { id: true, name: true, image: true },
+      },
       members: {
         include: {
           user: { select: { id: true, name: true, image: true } },
+        },
+      },
+      _count: {
+        select: {
+          members: { where: { isApproved: true } },
+          posts: { where: { status: 'PUBLISHED' } },
         },
       },
     },
@@ -108,7 +117,7 @@ const getGroupBySlug = async (slug: string, currentUserId?: string, currentUserR
       },
       members: {
         where: { isApproved: true },
-        take: 30,
+        take: 100,
         include: {
           user: { select: { id: true, name: true, image: true, role: true } },
         },
@@ -247,22 +256,151 @@ const updateMemberRole = async (
   callerRole: string,
   groupId: string,
   memberId: string,
-  newRole: 'MODERATOR' | 'MEMBER'
+  newRole: 'ADMIN' | 'MODERATOR' | 'MEMBER'
 ) => {
   const group = await prisma.group.findUnique({ where: { id: groupId } });
   if (!group) throw new Error('Group not found.');
 
-  const isGroupAdmin = group.createdById === callerUserId;
+  const callerMembership = await prisma.groupMember.findUnique({
+    where: { groupId_userId: { groupId, userId: callerUserId } },
+  });
+
+  const isGroupAdmin = group.createdById === callerUserId || callerMembership?.role === 'ADMIN';
   const isPlatformAdmin = callerRole === 'ADMIN';
 
   if (!isGroupAdmin && !isPlatformAdmin) {
-    throw new Error('Only the Group Admin can change member roles.');
+    throw new Error('Only a Group Admin can change member roles.');
+  }
+
+  const targetMember = await prisma.groupMember.findUnique({ where: { id: memberId } });
+  if (!targetMember) throw new Error('Member not found.');
+
+  if (targetMember.userId === group.createdById && newRole !== 'ADMIN') {
+    throw new Error('Cannot demote the group creator.');
   }
 
   return await prisma.groupMember.update({
     where: { id: memberId },
-    data: { role: newRole },
-    include: { user: { select: { id: true, name: true, email: true } } },
+    data: { role: newRole as any },
+    include: { user: { select: { id: true, name: true, image: true, email: true } } },
+  });
+};
+
+const removeMember = async (
+  callerUserId: string,
+  callerRole: string,
+  groupId: string,
+  memberId: string
+) => {
+  const group = await prisma.group.findUnique({ where: { id: groupId } });
+  if (!group) throw new Error('Group not found.');
+
+  const callerMembership = await prisma.groupMember.findUnique({
+    where: { groupId_userId: { groupId, userId: callerUserId } },
+  });
+
+  const isGroupAdmin = group.createdById === callerUserId || callerMembership?.role === 'ADMIN';
+  const isGroupMod = callerMembership?.role === 'MODERATOR';
+  const isPlatformAdmin = callerRole === 'ADMIN';
+
+  if (!isGroupAdmin && !isGroupMod && !isPlatformAdmin) {
+    throw new Error('Only group admins and moderators can remove members.');
+  }
+
+  const targetMember = await prisma.groupMember.findUnique({ where: { id: memberId } });
+  if (!targetMember) throw new Error('Member not found.');
+
+  if (targetMember.userId === group.createdById) {
+    throw new Error('Cannot remove the group creator.');
+  }
+
+  if (isGroupMod && !isGroupAdmin && targetMember.role !== 'MEMBER') {
+    throw new Error('Moderators can only remove regular members.');
+  }
+
+  await prisma.groupMember.delete({ where: { id: memberId } });
+  return true;
+};
+
+const addMember = async (
+  callerUserId: string,
+  callerRole: string,
+  groupId: string,
+  userId: string,
+  role: 'ADMIN' | 'MODERATOR' | 'MEMBER' = 'MEMBER'
+) => {
+  const group = await prisma.group.findUnique({ where: { id: groupId } });
+  if (!group) throw new Error('Group not found.');
+
+  const callerMembership = await prisma.groupMember.findUnique({
+    where: { groupId_userId: { groupId, userId: callerUserId } },
+  });
+
+  const isMember = group.createdById === callerUserId || Boolean(callerMembership?.isApproved);
+  const isPlatformAdmin = callerRole === 'ADMIN';
+
+  if (!isMember && !isPlatformAdmin) {
+    throw new Error('You must be a member to invite or add people to this group.');
+  }
+
+  const targetUser = await prisma.user.findUnique({ where: { id: userId } });
+  if (!targetUser) throw new Error('User not found.');
+
+  const existing = await prisma.groupMember.findUnique({
+    where: { groupId_userId: { groupId, userId } },
+  });
+
+  if (existing) {
+    if (existing.isApproved) {
+      throw new Error('This user is already a member of the group.');
+    }
+    return await prisma.groupMember.update({
+      where: { id: existing.id },
+      data: { isApproved: true },
+      include: {
+        user: { select: { id: true, name: true, image: true, email: true } },
+      },
+    });
+  }
+
+  return await prisma.groupMember.create({
+    data: {
+      groupId,
+      userId,
+      role: (role as any) || 'MEMBER',
+      isApproved: true,
+    },
+    include: {
+      user: { select: { id: true, name: true, image: true, email: true } },
+    },
+  });
+};
+
+const updateGroupCover = async (
+  callerUserId: string,
+  callerRole: string,
+  groupId: string,
+  coverImage: string
+) => {
+  const group = await prisma.group.findUnique({ where: { id: groupId } });
+  if (!group) throw new Error('Group not found.');
+
+  const callerMembership = await prisma.groupMember.findUnique({
+    where: { groupId_userId: { groupId, userId: callerUserId } },
+  });
+
+  const isStaff =
+    group.createdById === callerUserId ||
+    ['ADMIN', 'MODERATOR'].includes(callerMembership?.role || '');
+  const isPlatformStaff = ['ADMIN', 'MODERATOR'].includes(callerRole);
+
+  if (!isStaff && !isPlatformStaff) {
+    throw new Error('Only group admins and moderators can update the group cover photo.');
+  }
+
+  return await prisma.group.update({
+    where: { id: groupId },
+    data: { coverImage },
   });
 };
 
@@ -275,11 +413,17 @@ const updateGroupSettings = async (
   const group = await prisma.group.findUnique({ where: { id: groupId } });
   if (!group) throw new Error('Group not found.');
 
-  const isGroupAdmin = group.createdById === callerUserId;
-  const isPlatformAdmin = callerRole === 'ADMIN';
+  const callerMembership = await prisma.groupMember.findUnique({
+    where: { groupId_userId: { groupId, userId: callerUserId } },
+  });
 
-  if (!isGroupAdmin && !isPlatformAdmin) {
-    throw new Error('Only Group Admin can modify group settings.');
+  const isStaff =
+    group.createdById === callerUserId ||
+    ['ADMIN', 'MODERATOR'].includes(callerMembership?.role || '');
+  const isPlatformStaff = ['ADMIN', 'MODERATOR'].includes(callerRole);
+
+  if (!isStaff && !isPlatformStaff) {
+    throw new Error('Only group admins and moderators can modify group settings.');
   }
 
   return await prisma.group.update({
@@ -304,6 +448,9 @@ export const GroupService = {
   leaveGroup,
   handleJoinRequest,
   updateMemberRole,
+  removeMember,
+  addMember,
+  updateGroupCover,
   updateGroupSettings,
 };
 

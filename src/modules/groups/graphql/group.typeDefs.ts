@@ -23,11 +23,13 @@ export const groupTypeDefs = /* GraphQL */ `
     privacy: String!
     requiresPostApproval: Boolean
     createdById: ID!
+    createdBy: GroupMemberUser
     members: [GroupMember!]
     membersCount: Int
     postsCount: Int
     isMember: Boolean
     currentUserRole: String
+    canModerate: Boolean
     createdAt: String
   }
 
@@ -37,11 +39,20 @@ export const groupTypeDefs = /* GraphQL */ `
   }
 
   type Mutation {
-    createGroup(name: String!, description: String, privacy: String): Group!
+    createGroup(
+      name: String!
+      description: String
+      privacy: String
+      coverImage: String
+      avatar: String
+    ): Group!
     joinGroup(groupId: ID!): Boolean!
     leaveGroup(groupId: ID!): Boolean!
+    updateGroupMemberRole(groupId: ID!, memberId: ID!, role: String!): GroupMember!
+    removeGroupMember(groupId: ID!, memberId: ID!): Boolean!
+    addGroupMember(groupId: ID!, userId: ID!, role: String): GroupMember!
+    updateGroupCover(groupId: ID!, coverImage: String!): Group!
   }
 `;
 
 export default groupTypeDefs;
-
