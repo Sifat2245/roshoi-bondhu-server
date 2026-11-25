@@ -8,10 +8,19 @@ interface CreateGroupInput {
   avatar?: string;
   privacy?: 'PUBLIC' | 'PRIVATE';
   requiresPostApproval?: boolean;
+  invitedUserIds?: string[];
 }
 
 const createGroup = async (userId: string, data: CreateGroupInput) => {
-  const { name, description, coverImage, avatar, privacy = 'PUBLIC', requiresPostApproval = false } = data;
+  const {
+    name,
+    description,
+    coverImage,
+    avatar,
+    privacy = 'PUBLIC',
+    requiresPostApproval = false,
+    invitedUserIds = [],
+  } = data;
 
   if (!name || !name.trim()) throw new Error('Group name is required.');
 
@@ -22,6 +31,16 @@ const createGroup = async (userId: string, data: CreateGroupInput) => {
   while (await prisma.group.findUnique({ where: { slug } })) {
     slug = `${baseSlug}-${counter}`;
     counter++;
+  }
+
+  const candidateIds = Array.from(new Set(invitedUserIds.filter((id) => id && id !== userId)));
+  let validInvitedIds: string[] = [];
+  if (candidateIds.length > 0) {
+    const existingUsers = await prisma.user.findMany({
+      where: { id: { in: candidateIds }, isBanned: false },
+      select: { id: true },
+    });
+    validInvitedIds = existingUsers.map((u) => u.id);
   }
 
   return await prisma.group.create({
@@ -35,11 +54,18 @@ const createGroup = async (userId: string, data: CreateGroupInput) => {
       requiresPostApproval: Boolean(requiresPostApproval),
       createdById: userId,
       members: {
-        create: {
-          userId,
-          role: 'ADMIN',
-          isApproved: true,
-        },
+        create: [
+          {
+            userId,
+            role: 'ADMIN',
+            isApproved: true,
+          },
+          ...validInvitedIds.map((invitedId) => ({
+            userId: invitedId,
+            role: 'MEMBER' as const,
+            isApproved: true,
+          })),
+        ],
       },
     },
     include: {
@@ -72,12 +98,17 @@ const getGroups = async (search?: string, myGroups?: boolean, currentUserId?: st
   }
 
   if (myGroups && currentUserId) {
-    where.members = {
-      some: {
-        userId: currentUserId,
-        isApproved: true,
+    where.OR = [
+      { createdById: currentUserId },
+      {
+        members: {
+          some: {
+            userId: currentUserId,
+            isApproved: true,
+          },
+        },
       },
-    };
+    ];
   }
 
   const groups = await prisma.group.findMany({
@@ -89,6 +120,9 @@ const getGroups = async (search?: string, myGroups?: boolean, currentUserId?: st
           members: { where: { isApproved: true } },
           posts: { where: { status: 'PUBLISHED' } },
         },
+      },
+      createdBy: {
+        select: { id: true, name: true, image: true },
       },
       members: currentUserId
         ? {
@@ -174,13 +208,17 @@ const getGroupBySlug = async (slug: string, currentUserId?: string, currentUserR
   };
 };
 
-const joinGroup = async (userId: string, groupId: string) => {
-  const group = await prisma.group.findUnique({ where: { id: groupId } });
+const joinGroup = async (userId: string, groupIdOrSlug: string) => {
+  const group = await prisma.group.findFirst({
+    where: {
+      OR: [{ id: groupIdOrSlug }, { slug: groupIdOrSlug }],
+    },
+  });
   if (!group) throw new Error('Group not found.');
 
   const existingMember = await prisma.groupMember.findUnique({
     where: {
-      groupId_userId: { groupId, userId },
+      groupId_userId: { groupId: group.id, userId },
     },
   });
 
@@ -196,7 +234,7 @@ const joinGroup = async (userId: string, groupId: string) => {
 
   const membership = await prisma.groupMember.create({
     data: {
-      groupId,
+      groupId: group.id,
       userId,
       role: 'MEMBER',
       isApproved,
@@ -206,8 +244,12 @@ const joinGroup = async (userId: string, groupId: string) => {
   return { isApproved, membership };
 };
 
-const leaveGroup = async (userId: string, groupId: string) => {
-  const group = await prisma.group.findUnique({ where: { id: groupId } });
+const leaveGroup = async (userId: string, groupIdOrSlug: string) => {
+  const group = await prisma.group.findFirst({
+    where: {
+      OR: [{ id: groupIdOrSlug }, { slug: groupIdOrSlug }],
+    },
+  });
   if (!group) throw new Error('Group not found.');
 
   if (group.createdById === userId) {
@@ -215,10 +257,10 @@ const leaveGroup = async (userId: string, groupId: string) => {
   }
 
   await prisma.groupMember.deleteMany({
-    where: { groupId, userId },
+    where: { groupId: group.id, userId },
   });
 
-  return { groupId };
+  return { groupId: group.id };
 };
 
 const handleJoinRequest = async (

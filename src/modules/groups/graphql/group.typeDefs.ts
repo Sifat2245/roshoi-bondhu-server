@@ -45,6 +45,7 @@ export const groupTypeDefs = /* GraphQL */ `
       privacy: String
       coverImage: String
       avatar: String
+      invitedUserIds: [ID!]
     ): Group!
     joinGroup(groupId: ID!): Boolean!
     leaveGroup(groupId: ID!): Boolean!

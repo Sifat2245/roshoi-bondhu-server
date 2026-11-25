@@ -41,6 +41,7 @@ export const groupResolvers = {
         privacy?: string;
         coverImage?: string;
         avatar?: string;
+        invitedUserIds?: string[];
       },
       context: GraphQLContext
     ) => {
@@ -53,6 +54,7 @@ export const groupResolvers = {
         privacy: (args.privacy as any) || 'PUBLIC',
         coverImage: args.coverImage,
         avatar: args.avatar,
+        invitedUserIds: args.invitedUserIds,
       });
     },
 
@@ -167,9 +169,9 @@ export const groupResolvers = {
     },
     currentUserRole: (g: any, _args: unknown, context: GraphQLContext) => {
       if (g.currentUserRole !== undefined) return g.currentUserRole;
+      if (context.currentUser?.id && g.createdById === context.currentUser.id) return 'ADMIN';
       if (g.myMembership) return g.myMembership.role;
       if (context.currentUser?.id) {
-        if (g.createdById === context.currentUser.id) return 'ADMIN';
         if (g.members && Array.isArray(g.members)) {
           const m = g.members.find(
             (x: any) => x.userId === context.currentUser?.id || x.user?.id === context.currentUser?.id

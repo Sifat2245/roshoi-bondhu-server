@@ -194,7 +194,8 @@ export class FriendsService {
       return {
         id: target.id,
         name: target.name,
-        username: target.profile?.username || target.email?.split('@')[0],
+        email: target.email || '',
+        username: target.profile?.username || target.email?.split('@')[0] || '',
         image: target.image || null,
         city: target.profile?.city || null,
         work: target.profile?.work || null,
@@ -209,8 +210,8 @@ export class FriendsService {
       const q = search.trim().toLowerCase();
       return friends.filter(
         (f) =>
-          f.name.toLowerCase().includes(q) ||
-          f.username.toLowerCase().includes(q) ||
+          (f.name || '').toLowerCase().includes(q) ||
+          (f.username || '').toLowerCase().includes(q) ||
           (f.city && f.city.toLowerCase().includes(q))
       );
     }
@@ -257,6 +258,9 @@ export class FriendsService {
 
       return {
         id: req.id,
+        senderId: req.senderId,
+        receiverId: req.receiverId,
+        status: req.status,
         userId: req.sender.id,
         name: req.sender.name,
         username: req.sender.profile?.username || '',
@@ -265,6 +269,14 @@ export class FriendsService {
         work: req.sender.profile?.work || null,
         bio: req.sender.profile?.bio || null,
         mutualFriends: mutualCount,
+        sender: {
+          id: req.sender.id,
+          name: req.sender.name,
+          image: req.sender.image || null,
+          username: req.sender.profile?.username || '',
+          city: req.sender.profile?.city || null,
+          bio: req.sender.profile?.bio || null,
+        },
         createdAt: req.createdAt,
       };
     });
