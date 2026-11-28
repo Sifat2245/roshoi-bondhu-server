@@ -1,4 +1,4 @@
-# Heshel / Roshoi Bondhu backend
+# Heshel Backend
 
 Backend source for the recipe-sharing social platform, using **TypeScript, Express, PostgreSQL, Prisma, Better Auth and GraphQL Yoga**.
 

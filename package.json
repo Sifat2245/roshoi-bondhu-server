@@ -4,9 +4,11 @@
   "type": "module",
   "main": "src/server.ts",
   "scripts": {
+    "postinstall": "prisma generate",
     "start": "tsx src/server.ts",
+    "start:prod": "node dist/src/server.js",
     "dev": "tsx watch src/server.ts",
-    "build": "tsc",
+    "build": "prisma generate && tsc",
     "prisma:generate": "prisma generate",
     "prisma:push": "prisma db push",
     "prisma:studio": "prisma studio",

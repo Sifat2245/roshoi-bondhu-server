@@ -1,7 +1,7 @@
 import type { Server as HttpServer } from 'node:http';
 import { Server as SocketIOServer, type Socket } from 'socket.io';
 import { env } from '../config/env.js';
-import { allowedOrigins } from '../config/cors.js';
+import { allowedOrigins, isOriginAllowed } from '../config/cors.js';
 import prisma from '../lib/prisma.js';
 import {
   resolveUserFromHeaders,
@@ -33,7 +33,7 @@ export function initSocketServer(httpServer: HttpServer): SocketIOServer {
     pingTimeout: env.SOCKET_PING_TIMEOUT,
     cors: {
       origin: (origin, callback) => {
-        if (!origin || origins.includes(origin) || env.NODE_ENV !== 'production') {
+        if (isOriginAllowed(origin, origins)) {
           return callback(null, true);
         }
         return callback(new Error(`Socket CORS blocked for origin: ${origin}`));

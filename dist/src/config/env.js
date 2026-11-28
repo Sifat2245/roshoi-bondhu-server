@@ -5,8 +5,13 @@ export const env = {
     PORT: parseInt(process.env.PORT || '5000', 10),
     DATABASE_URL: process.env.DATABASE_URL || '',
     BETTER_AUTH_SECRET: process.env.BETTER_AUTH_SECRET || 'hesheli-super-secret-key-fallback',
-    BETTER_AUTH_URL: process.env.BETTER_AUTH_URL || 'http://localhost:5000',
-    CLIENT_URL: process.env.CLIENT_URL || 'http://localhost:5173',
+    BETTER_AUTH_URL: process.env.BETTER_AUTH_URL ||
+        (process.env.VERCEL ? 'https://heshel-server.vercel.app' : 'http://localhost:5000'),
+    CLIENT_URL: process.env.CLIENT_URL ||
+        (process.env.NODE_ENV === 'production'
+            ? 'https://heshel-server-fg2v.vercel.app'
+            : 'http://localhost:5173'),
+    CORS_ORIGINS: process.env.CORS_ORIGINS,
     COOKIE_DOMAIN: process.env.COOKIE_DOMAIN,
     JWT_ACCESS_SECRET: process.env.JWT_ACCESS_SECRET || 'hesheli-access-secret',
     JWT_ACCESS_EXPIRES_IN: (process.env.JWT_ACCESS_EXPIRES_IN || '15m'),
@@ -22,9 +27,13 @@ export const env = {
     SMTP_USER: process.env.SMTP_USER,
     SMTP_PASS: process.env.SMTP_PASS,
     SMTP_FROM: process.env.SMTP_FROM || '"Heshel • হেঁশেল" <no-reply@heshel.com>',
-    SOCKET_ENABLED: process.env.SOCKET_ENABLED !== 'false',
+    SOCKET_ENABLED: process.env.SOCKET_ENABLED !== 'false' && process.env.VERCEL !== '1',
     SOCKET_PATH: process.env.SOCKET_PATH || '/socket.io',
-    SOCKET_CORS_ORIGIN: process.env.SOCKET_CORS_ORIGIN || process.env.CLIENT_URL || 'http://localhost:5173',
+    SOCKET_CORS_ORIGIN: process.env.SOCKET_CORS_ORIGIN ||
+        process.env.CLIENT_URL ||
+        (process.env.NODE_ENV === 'production'
+            ? 'https://heshel-server-fg2v.vercel.app'
+            : 'http://localhost:5173'),
     SOCKET_PING_INTERVAL: parseInt(process.env.SOCKET_PING_INTERVAL || '25000', 10),
     SOCKET_PING_TIMEOUT: parseInt(process.env.SOCKET_PING_TIMEOUT || '20000', 10),
     VAPID_PUBLIC_KEY: process.env.VAPID_PUBLIC_KEY,

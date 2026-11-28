@@ -4,19 +4,29 @@ import { emailOTP, bearer, twoFactor } from 'better-auth/plugins';
 import { passkey } from '@better-auth/passkey';
 import prisma from './prisma.js';
 import { env } from '../config/env.js';
+import { allowedOrigins } from '../config/cors.js';
 import EmailService from '../shared/services/email.service.js';
+const resolveRpId = () => {
+    if (env.NODE_ENV !== 'production')
+        return 'localhost';
+    try {
+        return new URL(env.CLIENT_URL).hostname;
+    }
+    catch {
+        return 'localhost';
+    }
+};
+const authOrigins = Array.from(new Set([
+    ...allowedOrigins,
+    ...(env.BETTER_AUTH_URL ? [env.BETTER_AUTH_URL.replace(/\/+$/, '')] : []),
+]));
 export const auth = betterAuth({
     database: prismaAdapter(prisma, {
         provider: 'postgresql',
     }),
     secret: env.BETTER_AUTH_SECRET,
     baseURL: env.BETTER_AUTH_URL,
-    trustedOrigins: [
-        env.CLIENT_URL,
-        'http://localhost:5173',
-        'http://localhost:5174',
-        'http://localhost:3000',
-    ],
+    trustedOrigins: authOrigins,
     emailAndPassword: {
         enabled: true,
         autoSignIn: false, // Require email OTP verification before activating full session
@@ -29,18 +39,17 @@ export const auth = betterAuth({
     advanced: {
         useSecureCookies: env.NODE_ENV === 'production',
         cookiePrefix: 'heshel',
+        defaultCookieAttributes: {
+            sameSite: env.NODE_ENV === 'production' ? 'none' : 'lax',
+            secure: env.NODE_ENV === 'production',
+        },
     },
     plugins: [
         bearer(),
         passkey({
             rpName: 'Heshel',
-            rpID: env.NODE_ENV === 'production' ? new URL(env.CLIENT_URL).hostname : 'localhost',
-            origin: [
-                env.CLIENT_URL,
-                'http://localhost:5173',
-                'http://localhost:5174',
-                'http://localhost:3000',
-            ],
+            rpID: resolveRpId(),
+            origin: authOrigins,
         }),
         twoFactor({
             issuer: 'Heshel',
