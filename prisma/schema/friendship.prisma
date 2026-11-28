@@ -4,8 +4,9 @@ model FriendshipRequest {
   sender     User                    @relation("SentFriendRequests", fields: [senderId], references: [id], onDelete: Cascade)
   receiverId String
   receiver   User                    @relation("ReceivedFriendRequests", fields: [receiverId], references: [id], onDelete: Cascade)
-  status     FriendshipRequestStatus @default(PENDING)
-  createdAt  DateTime                @default(now())
+  status        FriendshipRequestStatus @default(PENDING)
+  notifications Notification[]
+  createdAt     DateTime                @default(now())
   updatedAt  DateTime                @updatedAt
 
   @@unique([senderId, receiverId])

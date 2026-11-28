@@ -1,5 +1,9 @@
+import crypto from 'node:crypto';
 import prisma from '../../lib/prisma.js';
 import slugify from 'slugify';
+import { NotificationService } from '../notifications/notification.service.js';
+
+const db = prisma as any;
 
 interface CreateGroupInput {
   name: string;
@@ -8,6 +12,7 @@ interface CreateGroupInput {
   avatar?: string;
   privacy?: 'PUBLIC' | 'PRIVATE';
   discoverability?: 'VISIBLE' | 'HIDDEN';
+  joinMode?: 'DIRECT' | 'ADMIN_APPROVAL';
   requiresPostApproval?: boolean;
   invitedUserIds?: string[];
 }
@@ -19,12 +24,28 @@ interface UpdateGroupSettingsInput {
   avatar?: string | null;
   privacy?: 'PUBLIC' | 'PRIVATE';
   discoverability?: 'VISIBLE' | 'HIDDEN';
+  joinMode?: 'DIRECT' | 'ADMIN_APPROVAL';
   requiresPostApproval?: boolean;
   challengeCreatorPolicy?: 'STAFF' | 'MEMBERS';
 }
 
 const getEffectiveOwnerId = (group: { ownerId?: string | null; createdById?: string | null }) =>
   group.ownerId || group.createdById || null;
+
+const isUserGroupStaff = async (
+  group: { id: string; ownerId?: string | null; createdById?: string | null },
+  userId?: string | null
+) => {
+  if (!userId) return false;
+  if (getEffectiveOwnerId(group) === userId) return true;
+  const membership = await prisma.groupMember.findUnique({
+    where: { groupId_userId: { groupId: group.id, userId } },
+    select: { role: true, isApproved: true },
+  });
+  return Boolean(
+    membership?.isApproved && ['ADMIN', 'MODERATOR'].includes(membership.role)
+  );
+};
 
 const createGroup = async (userId: string, data: CreateGroupInput) => {
   const {
@@ -34,6 +55,7 @@ const createGroup = async (userId: string, data: CreateGroupInput) => {
     avatar,
     privacy = 'PUBLIC',
     discoverability = 'VISIBLE',
+    joinMode = 'DIRECT',
     requiresPostApproval = false,
     invitedUserIds = [],
   } = data;
@@ -59,7 +81,7 @@ const createGroup = async (userId: string, data: CreateGroupInput) => {
     validInvitedIds = existingUsers.map((u) => u.id);
   }
 
-  return await prisma.group.create({
+  const createdGroup = await prisma.group.create({
     data: {
       name: name.trim(),
       slug,
@@ -68,6 +90,7 @@ const createGroup = async (userId: string, data: CreateGroupInput) => {
       avatar,
       privacy,
       discoverability,
+      joinMode: joinMode === 'ADMIN_APPROVAL' ? 'ADMIN_APPROVAL' : 'DIRECT',
       requiresPostApproval: Boolean(requiresPostApproval),
       ownerId: userId,
       createdById: userId,
@@ -78,11 +101,6 @@ const createGroup = async (userId: string, data: CreateGroupInput) => {
             role: 'ADMIN',
             isApproved: true,
           },
-          ...validInvitedIds.map((invitedId) => ({
-            userId: invitedId,
-            role: 'MEMBER' as const,
-            isApproved: true,
-          })),
         ],
       },
     },
@@ -106,6 +124,41 @@ const createGroup = async (userId: string, data: CreateGroupInput) => {
       },
     },
   });
+
+  if (validInvitedIds.length > 0) {
+    await Promise.all(
+      validInvitedIds.map(async (inviteeId) => {
+        try {
+          const invitation = await db.groupInvitation.upsert({
+            where: { groupId_inviteeId: { groupId: createdGroup.id, inviteeId } },
+            update: {
+              inviterId: userId,
+              role: 'MEMBER',
+              status: 'PENDING',
+              respondedAt: null,
+            },
+            create: {
+              groupId: createdGroup.id,
+              inviterId: userId,
+              inviteeId,
+              role: 'MEMBER',
+              status: 'PENDING',
+            },
+          });
+          await NotificationService.notifyGroupInvite(
+            userId,
+            inviteeId,
+            { id: createdGroup.id, name: createdGroup.name, slug: createdGroup.slug },
+            invitation.id
+          );
+        } catch {
+          /* ignore individual invite failure */
+        }
+      })
+    );
+  }
+
+  return createdGroup;
 };
 
 const getGroups = async (search?: string, myGroups?: boolean, currentUserId?: string) => {
@@ -221,15 +274,28 @@ const getGroupBySlug = async (slug: string, currentUserId?: string, _currentUser
   if (!group || group.status === 'DELETED') throw new Error('Group not found.');
 
   let myMembership = null;
+  let myPendingInvite = null;
   if (currentUserId) {
-    myMembership = await prisma.groupMember.findUnique({
-      where: {
-        groupId_userId: {
-          groupId: group.id,
-          userId: currentUserId,
+    [myMembership, myPendingInvite] = await Promise.all([
+      prisma.groupMember.findUnique({
+        where: {
+          groupId_userId: {
+            groupId: group.id,
+            userId: currentUserId,
+          },
         },
-      },
-    });
+      }),
+      db.groupInvitation.findFirst({
+        where: {
+          groupId: group.id,
+          inviteeId: currentUserId,
+          status: 'PENDING',
+        },
+        include: {
+          inviter: { select: { id: true, name: true, image: true } },
+        },
+      }),
+    ]);
   }
 
   const effectiveOwnerId = getEffectiveOwnerId(group);
@@ -260,6 +326,13 @@ const getGroupBySlug = async (slug: string, currentUserId?: string, _currentUser
   }
 
   const canViewMembers = group.privacy === 'PUBLIC' || Boolean(myMembership?.isApproved) || isOwner;
+  const myMembershipStatus = myMembership
+    ? myMembership.isApproved
+      ? 'APPROVED'
+      : 'PENDING'
+    : isOwner
+    ? 'APPROVED'
+    : 'NONE';
 
   return {
     ...group,
@@ -269,6 +342,18 @@ const getGroupBySlug = async (slug: string, currentUserId?: string, _currentUser
     memberCount: group._count.members,
     postCount: group._count.posts,
     myMembership,
+    myMembershipStatus,
+    myPendingInvite: myPendingInvite
+      ? {
+          id: myPendingInvite.id,
+          role: myPendingInvite.role,
+          inviter: myPendingInvite.inviter,
+          createdAt:
+            myPendingInvite.createdAt instanceof Date
+              ? myPendingInvite.createdAt.toISOString()
+              : String(myPendingInvite.createdAt || ''),
+        }
+      : null,
     canModerate: isGroupStaff,
     pendingRequestsCount,
     pendingPostsCount,
@@ -281,7 +366,7 @@ const joinGroup = async (userId: string, groupIdOrSlug: string) => {
       OR: [{ id: groupIdOrSlug }, { slug: groupIdOrSlug }],
     },
   });
-  if (!group) throw new Error('Group not found.');
+  if (!group || group.status === 'DELETED') throw new Error('Group not found.');
 
   const existingMember = await prisma.groupMember.findUnique({
     where: {
@@ -297,7 +382,19 @@ const joinGroup = async (userId: string, groupIdOrSlug: string) => {
     }
   }
 
-  const isApproved = group.privacy === 'PUBLIC';
+  const pendingInvite = await db.groupInvitation.findUnique({
+    where: { groupId_inviteeId: { groupId: group.id, inviteeId: userId } },
+  });
+
+  if (pendingInvite && pendingInvite.status === 'PENDING') {
+    const res = await respondToInvitation(userId, pendingInvite.id, 'ACCEPT');
+    const membership = await prisma.groupMember.findUnique({
+      where: { groupId_userId: { groupId: group.id, userId } },
+    });
+    return { isApproved: Boolean(res.isApproved), membership };
+  }
+
+  const isApproved = (group as any).joinMode !== 'ADMIN_APPROVAL';
 
   const membership = await prisma.groupMember.create({
     data: {
@@ -307,6 +404,16 @@ const joinGroup = async (userId: string, groupIdOrSlug: string) => {
       isApproved,
     },
   });
+
+  if (!isApproved) {
+    await NotificationService.notifyGroupJoinRequest(userId, {
+      id: group.id,
+      name: group.name,
+      slug: group.slug,
+      ownerId: group.ownerId,
+      createdById: group.createdById,
+    }).catch(() => {});
+  }
 
   return { isApproved, membership };
 };
@@ -362,10 +469,19 @@ const handleJoinRequest = async (
   }
 
   if (action === 'APPROVE') {
-    return await prisma.groupMember.update({
+    const approved = await prisma.groupMember.update({
       where: { id: memberId },
       data: { isApproved: true, role: 'MEMBER' },
+      include: {
+        user: { select: { id: true, name: true, image: true } },
+      },
     });
+    await NotificationService.notifyGroupJoinApproved(callerUserId, targetMember.userId, {
+      id: group.id,
+      name: group.name,
+      slug: group.slug,
+    }).catch(() => {});
+    return approved;
   } else {
     return await prisma.groupMember.delete({
       where: { id: memberId },
@@ -541,6 +657,557 @@ const addMember = async (
   });
 };
 
+const inviteMember = async (
+  callerUserId: string,
+  callerRole: string,
+  groupId: string,
+  inviteeId: string,
+  role: 'ADMIN' | 'MODERATOR' | 'MEMBER' = 'MEMBER'
+) => {
+  const group = await prisma.group.findUnique({ where: { id: groupId } });
+  if (!group || group.status === 'DELETED') throw new Error('Group not found.');
+
+  if (callerUserId === inviteeId) {
+    throw new Error('You cannot invite yourself to a group.');
+  }
+
+  const callerMembership = await prisma.groupMember.findUnique({
+    where: { groupId_userId: { groupId, userId: callerUserId } },
+  });
+
+  const isMember = group.createdById === callerUserId || Boolean(callerMembership?.isApproved);
+  const isPlatformAdmin = callerRole === 'ADMIN';
+
+  if (!isMember && !isPlatformAdmin) {
+    throw new Error('You must be a member to invite people to this group.');
+  }
+
+  const targetUser = await prisma.user.findUnique({
+    where: { id: inviteeId },
+    select: { id: true, name: true, image: true, isBanned: true, deletedAt: true },
+  });
+  if (!targetUser || targetUser.isBanned || targetUser.deletedAt) {
+    throw new Error('User not found.');
+  }
+
+  const blocked = await prisma.userBlock.findFirst({
+    where: {
+      OR: [
+        { blockerId: callerUserId, blockedId: inviteeId },
+        { blockerId: inviteeId, blockedId: callerUserId },
+      ],
+    },
+    select: { id: true },
+  });
+  if (blocked) {
+    throw new Error('Unable to invite this user.');
+  }
+
+  const existingMember = await prisma.groupMember.findUnique({
+    where: { groupId_userId: { groupId, userId: inviteeId } },
+  });
+  if (existingMember?.isApproved) {
+    throw new Error('This user is already a member of the group.');
+  }
+
+  const invitation = await db.groupInvitation.upsert({
+    where: { groupId_inviteeId: { groupId, inviteeId } },
+    update: {
+      inviterId: callerUserId,
+      role: (role as any) || 'MEMBER',
+      status: 'PENDING',
+      respondedAt: null,
+    },
+    create: {
+      groupId,
+      inviterId: callerUserId,
+      inviteeId,
+      role: (role as any) || 'MEMBER',
+      status: 'PENDING',
+    },
+    include: {
+      invitee: { select: { id: true, name: true, image: true } },
+    },
+  });
+
+  await NotificationService.notifyGroupInvite(
+    callerUserId,
+    inviteeId,
+    { id: group.id, name: group.name, slug: group.slug },
+    invitation.id
+  ).catch(() => {});
+
+  return invitation;
+};
+
+const respondToInvitation = async (
+  userId: string,
+  invitationId: string,
+  action: 'ACCEPT' | 'DECLINE'
+) => {
+  const invitation = await db.groupInvitation.findUnique({
+    where: { id: invitationId },
+    include: { group: true },
+  });
+
+  if (!invitation || invitation.inviteeId !== userId) {
+    throw new Error('Group invitation not found.');
+  }
+
+  if (invitation.status !== 'PENDING') {
+    await NotificationService.resolveGroupInviteNotification(
+      userId,
+      invitation.id,
+      invitation.status === 'ACCEPTED' ? 'ACCEPTED' : 'DECLINED'
+    ).catch(() => {});
+    return { success: true, status: invitation.status, groupSlug: invitation.group?.slug };
+  }
+
+  if (!invitation.group || invitation.group.status === 'DELETED') {
+    throw new Error('This group no longer exists.');
+  }
+
+  const now = new Date();
+  if (action === 'ACCEPT') {
+    const inviterIsStaff = await isUserGroupStaff(invitation.group, invitation.inviterId);
+    const shouldApproveDirectly =
+      (invitation.group as any).joinMode !== 'ADMIN_APPROVAL' || inviterIsStaff;
+
+    const existingMember = await prisma.groupMember.findUnique({
+      where: { groupId_userId: { groupId: invitation.groupId, userId } },
+    });
+    const finalApproved = existingMember?.isApproved ? true : shouldApproveDirectly;
+
+    await prisma.$transaction([
+      db.groupInvitation.update({
+        where: { id: invitation.id },
+        data: { status: 'ACCEPTED', respondedAt: now },
+      }),
+      prisma.groupMember.upsert({
+        where: { groupId_userId: { groupId: invitation.groupId, userId } },
+        update: { isApproved: finalApproved },
+        create: {
+          groupId: invitation.groupId,
+          userId,
+          role: invitation.role || 'MEMBER',
+          isApproved: finalApproved,
+        },
+      }),
+    ]);
+
+    await NotificationService.resolveGroupInviteNotification(
+      userId,
+      invitation.id,
+      'ACCEPTED'
+    ).catch(() => {});
+
+    if (!finalApproved) {
+      await NotificationService.notifyGroupJoinRequest(userId, {
+        id: invitation.group.id,
+        name: invitation.group.name,
+        slug: invitation.group.slug,
+        ownerId: invitation.group.ownerId,
+        createdById: invitation.group.createdById,
+      }).catch(() => {});
+    }
+
+    return {
+      success: true,
+      status: finalApproved ? 'ACCEPTED' : 'PENDING_APPROVAL',
+      isApproved: finalApproved,
+      groupSlug: invitation.group.slug,
+    };
+  }
+
+  await db.groupInvitation.update({
+    where: { id: invitation.id },
+    data: { status: 'DECLINED', respondedAt: now },
+  });
+
+  await NotificationService.resolveGroupInviteNotification(
+    userId,
+    invitation.id,
+    'DECLINED'
+  ).catch(() => {});
+  return {
+    success: true,
+    status: 'DECLINED',
+    isApproved: false,
+    groupSlug: invitation.group.slug,
+  };
+};
+
+const getOrCreateInviteLink = async (
+  callerUserId: string,
+  callerRole: string,
+  groupId: string
+) => {
+  const group = await prisma.group.findFirst({
+    where: { OR: [{ id: groupId }, { slug: groupId }] },
+  });
+  if (!group || group.status === 'DELETED') throw new Error('Group not found.');
+
+  const isStaff = await isUserGroupStaff(group, callerUserId);
+  const callerMembership = await prisma.groupMember.findUnique({
+    where: { groupId_userId: { groupId: group.id, userId: callerUserId } },
+  });
+  const isMember = isStaff || Boolean(callerMembership?.isApproved) || callerRole === 'ADMIN';
+  if (!isMember) {
+    throw new Error('You must be a group member to create an invite link.');
+  }
+
+  const now = new Date();
+  const existing = await db.groupInviteLink.findFirst({
+    where: {
+      groupId: group.id,
+      createdById: callerUserId,
+      revokedAt: null,
+      OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
+    },
+    orderBy: { createdAt: 'desc' },
+  });
+
+  if (existing) {
+    // Keep isStaffLink aligned with caller's current staff permission
+    if (existing.isStaffLink !== isStaff) {
+      return await db.groupInviteLink.update({
+        where: { id: existing.id },
+        data: { isStaffLink: isStaff },
+      });
+    }
+    return existing;
+  }
+
+  return await db.groupInviteLink.create({
+    data: {
+      groupId: group.id,
+      createdById: callerUserId,
+      token: crypto.randomBytes(18).toString('base64url'),
+      isStaffLink: isStaff,
+    },
+  });
+};
+
+const regenerateInviteLink = async (
+  callerUserId: string,
+  callerRole: string,
+  groupId: string
+) => {
+  const group = await prisma.group.findFirst({
+    where: { OR: [{ id: groupId }, { slug: groupId }] },
+  });
+  if (!group || group.status === 'DELETED') throw new Error('Group not found.');
+
+  const isStaff = await isUserGroupStaff(group, callerUserId);
+  const callerMembership = await prisma.groupMember.findUnique({
+    where: { groupId_userId: { groupId: group.id, userId: callerUserId } },
+  });
+  const isMember = isStaff || Boolean(callerMembership?.isApproved) || callerRole === 'ADMIN';
+  if (!isMember) {
+    throw new Error('You must be a group member to regenerate an invite link.');
+  }
+
+  const now = new Date();
+  await db.groupInviteLink.updateMany({
+    where: { groupId: group.id, createdById: callerUserId, revokedAt: null },
+    data: { revokedAt: now },
+  });
+
+  return await db.groupInviteLink.create({
+    data: {
+      groupId: group.id,
+      createdById: callerUserId,
+      token: crypto.randomBytes(18).toString('base64url'),
+      isStaffLink: isStaff,
+    },
+  });
+};
+
+const revokeInviteLink = async (
+  callerUserId: string,
+  callerRole: string,
+  groupId: string,
+  linkId?: string
+) => {
+  const group = await prisma.group.findFirst({
+    where: { OR: [{ id: groupId }, { slug: groupId }] },
+  });
+  if (!group || group.status === 'DELETED') throw new Error('Group not found.');
+
+  const isStaff = (await isUserGroupStaff(group, callerUserId)) || callerRole === 'ADMIN';
+  const now = new Date();
+
+  if (linkId) {
+    const link = await db.groupInviteLink.findFirst({
+      where: { id: linkId, groupId: group.id },
+    });
+    if (!link) throw new Error('Invite link not found.');
+    if (!isStaff && link.createdById !== callerUserId) {
+      throw new Error('Not authorized to revoke this invite link.');
+    }
+    await db.groupInviteLink.update({
+      where: { id: link.id },
+      data: { revokedAt: now },
+    });
+    return true;
+  }
+
+  await db.groupInviteLink.updateMany({
+    where: isStaff
+      ? { groupId: group.id, revokedAt: null }
+      : { groupId: group.id, createdById: callerUserId, revokedAt: null },
+    data: { revokedAt: now },
+  });
+  return true;
+};
+
+const getGroupInvitePreview = async (
+  groupIdOrSlug: string,
+  inviteToken: string,
+  currentUserId?: string
+) => {
+  if (!inviteToken?.trim()) {
+    return { valid: false, reason: 'Invitation token is missing.' };
+  }
+
+  const link = await db.groupInviteLink.findUnique({
+    where: { token: inviteToken.trim() },
+    include: {
+      createdBy: { select: { id: true, name: true, image: true } },
+      group: {
+        include: {
+          _count: {
+            select: { members: { where: { isApproved: true } } },
+          },
+        },
+      },
+    },
+  });
+
+  if (!link || !link.group || link.group.status === 'DELETED') {
+    return { valid: false, reason: 'This invitation link is invalid or expired.' };
+  }
+
+  if (link.group.id !== groupIdOrSlug && link.group.slug !== groupIdOrSlug) {
+    return { valid: false, reason: 'This invitation link is for a different group.' };
+  }
+
+  if (link.revokedAt) {
+    return { valid: false, reason: 'This invitation link has been revoked.' };
+  }
+
+  if (link.expiresAt && new Date(link.expiresAt) < new Date()) {
+    return { valid: false, reason: 'This invitation link has expired.' };
+  }
+
+  const inviterIsStaff =
+    link.isStaffLink || (await isUserGroupStaff(link.group, link.createdById));
+  const requiresAdminApproval =
+    (link.group as any).joinMode === 'ADMIN_APPROVAL' && !inviterIsStaff;
+
+  let membershipStatus: 'APPROVED' | 'PENDING' | 'NONE' = 'NONE';
+  if (currentUserId) {
+    const member = await prisma.groupMember.findUnique({
+      where: { groupId_userId: { groupId: link.group.id, userId: currentUserId } },
+    });
+    if (member) {
+      membershipStatus = member.isApproved ? 'APPROVED' : 'PENDING';
+    } else if (getEffectiveOwnerId(link.group) === currentUserId) {
+      membershipStatus = 'APPROVED';
+    }
+  }
+
+  return {
+    valid: true,
+    isStaffInvite: inviterIsStaff,
+    requiresAdminApproval,
+    membershipStatus,
+    joinMode: (link.group as any).joinMode || 'DIRECT',
+    inviter: link.createdBy,
+    group: {
+      id: link.group.id,
+      name: link.group.name,
+      slug: link.group.slug,
+      privacy: link.group.privacy,
+      avatar: link.group.avatar,
+      coverImage: link.group.coverImage,
+      membersCount: link.group._count?.members || 0,
+    },
+  };
+};
+
+const acceptGroupInviteLink = async (userId: string, inviteToken: string) => {
+  const link = await db.groupInviteLink.findUnique({
+    where: { token: inviteToken.trim() },
+    include: { group: true },
+  });
+
+  if (!link || !link.group || link.group.status === 'DELETED') {
+    throw new Error('This invitation link is invalid.');
+  }
+  if (link.revokedAt) {
+    throw new Error('This invitation link has been revoked.');
+  }
+  if (link.expiresAt && new Date(link.expiresAt) < new Date()) {
+    throw new Error('This invitation link has expired.');
+  }
+
+  const existing = await prisma.groupMember.findUnique({
+    where: { groupId_userId: { groupId: link.group.id, userId } },
+  });
+  if (existing) {
+    if (existing.isApproved) {
+      return { status: 'ALREADY_MEMBER', isApproved: true, groupSlug: link.group.slug };
+    }
+    return { status: 'PENDING_APPROVAL', isApproved: false, groupSlug: link.group.slug };
+  }
+
+  const inviterIsStaff =
+    link.isStaffLink || (await isUserGroupStaff(link.group, link.createdById));
+  const shouldApproveDirectly =
+    (link.group as any).joinMode !== 'ADMIN_APPROVAL' || inviterIsStaff;
+
+  await prisma.$transaction([
+    prisma.groupMember.create({
+      data: {
+        groupId: link.group.id,
+        userId,
+        role: 'MEMBER',
+        isApproved: shouldApproveDirectly,
+      },
+    }),
+    db.groupInviteLink.update({
+      where: { id: link.id },
+      data: { useCount: { increment: 1 } },
+    }),
+  ]);
+
+  const pendingInvite = await db.groupInvitation.findUnique({
+    where: { groupId_inviteeId: { groupId: link.group.id, inviteeId: userId } },
+  });
+  if (pendingInvite && pendingInvite.status === 'PENDING') {
+    await db.groupInvitation.update({
+      where: { id: pendingInvite.id },
+      data: { status: 'ACCEPTED', respondedAt: new Date() },
+    });
+    await NotificationService.resolveGroupInviteNotification(
+      userId,
+      pendingInvite.id,
+      'ACCEPTED'
+    ).catch(() => {});
+  }
+
+  if (!shouldApproveDirectly) {
+    await NotificationService.notifyGroupJoinRequest(userId, {
+      id: link.group.id,
+      name: link.group.name,
+      slug: link.group.slug,
+      ownerId: link.group.ownerId,
+      createdById: link.group.createdById,
+    }).catch(() => {});
+  }
+
+  return {
+    status: shouldApproveDirectly ? 'JOINED' : 'PENDING_APPROVAL',
+    isApproved: shouldApproveDirectly,
+    groupSlug: link.group.slug,
+  };
+};
+
+const getGroupJoinRequests = async (
+  callerUserId: string,
+  callerRole: string,
+  groupId: string
+) => {
+  const group = await prisma.group.findFirst({
+    where: { OR: [{ id: groupId }, { slug: groupId }] },
+  });
+  if (!group || group.status === 'DELETED') throw new Error('Group not found.');
+
+  const isStaff = (await isUserGroupStaff(group, callerUserId)) || callerRole === 'ADMIN';
+  if (!isStaff) {
+    throw new Error('Only group admins and moderators can view join requests.');
+  }
+
+  const requests = await prisma.groupMember.findMany({
+    where: { groupId: group.id, isApproved: false },
+    orderBy: { createdAt: 'asc' },
+    include: {
+      user: { select: { id: true, name: true, image: true, bio: true } },
+    },
+  });
+
+  return requests.map((r) => ({
+    ...r,
+    createdAt: r.createdAt.toISOString(),
+  }));
+};
+
+const getGroupPendingInvitations = async (
+  callerUserId: string,
+  callerRole: string,
+  groupId: string
+) => {
+  const group = await prisma.group.findFirst({
+    where: { OR: [{ id: groupId }, { slug: groupId }] },
+  });
+  if (!group || group.status === 'DELETED') throw new Error('Group not found.');
+
+  const isStaff = (await isUserGroupStaff(group, callerUserId)) || callerRole === 'ADMIN';
+  if (!isStaff) {
+    throw new Error('Only group admins and moderators can view pending invitations.');
+  }
+
+  const rows = await db.groupInvitation.findMany({
+    where: { groupId: group.id, status: 'PENDING' },
+    orderBy: { createdAt: 'desc' },
+    include: {
+      inviter: { select: { id: true, name: true, image: true } },
+      invitee: { select: { id: true, name: true, image: true } },
+    },
+  });
+
+  return rows.map((row: any) => ({
+    ...row,
+    createdAt: row.createdAt instanceof Date ? row.createdAt.toISOString() : String(row.createdAt || ''),
+  }));
+};
+
+const cancelGroupInvitation = async (
+  callerUserId: string,
+  callerRole: string,
+  groupId: string,
+  invitationId: string
+) => {
+  const group = await prisma.group.findFirst({
+    where: { OR: [{ id: groupId }, { slug: groupId }] },
+  });
+  if (!group || group.status === 'DELETED') throw new Error('Group not found.');
+
+  const invitation = await db.groupInvitation.findFirst({
+    where: { id: invitationId, groupId: group.id },
+  });
+  if (!invitation) throw new Error('Invitation not found.');
+
+  const isStaff = (await isUserGroupStaff(group, callerUserId)) || callerRole === 'ADMIN';
+  if (!isStaff && invitation.inviterId !== callerUserId) {
+    throw new Error('Not authorized to cancel this invitation.');
+  }
+
+  await db.groupInvitation.update({
+    where: { id: invitation.id },
+    data: { status: 'CANCELLED', respondedAt: new Date() },
+  });
+
+  await NotificationService.resolveGroupInviteNotification(
+    invitation.inviteeId,
+    invitation.id,
+    'CANCELLED'
+  ).catch(() => {});
+
+  return true;
+};
+
 const updateGroupCover = async (
   callerUserId: string,
   callerRole: string,
@@ -613,6 +1280,13 @@ const updateGroupSettings = async (
   }
 
   if (
+    settings.joinMode !== undefined &&
+    !['DIRECT', 'ADMIN_APPROVAL'].includes(settings.joinMode)
+  ) {
+    throw new Error('Invalid join mode setting.');
+  }
+
+  if (
     settings.challengeCreatorPolicy !== undefined &&
     !['STAFF', 'MEMBERS'].includes(settings.challengeCreatorPolicy)
   ) {
@@ -629,6 +1303,7 @@ const updateGroupSettings = async (
       privacy: settings.privacy !== undefined ? settings.privacy : undefined,
       discoverability:
         settings.discoverability !== undefined ? settings.discoverability : undefined,
+      joinMode: settings.joinMode !== undefined ? settings.joinMode : undefined,
       requiresPostApproval:
         settings.requiresPostApproval !== undefined
           ? Boolean(settings.requiresPostApproval)
@@ -638,7 +1313,7 @@ const updateGroupSettings = async (
           ? settings.challengeCreatorPolicy
           : undefined,
       version: { increment: 1 },
-    },
+    } as any,
   });
 
   return await getGroupBySlug(group.slug, callerUserId);
@@ -772,6 +1447,16 @@ export const GroupService = {
   updateMemberRole,
   removeMember,
   addMember,
+  inviteMember,
+  respondToInvitation,
+  getOrCreateInviteLink,
+  regenerateInviteLink,
+  revokeInviteLink,
+  getGroupInvitePreview,
+  acceptGroupInviteLink,
+  getGroupJoinRequests,
+  getGroupPendingInvitations,
+  cancelGroupInvitation,
   updateGroupCover,
   updateGroupSettings,
   transferGroupOwnership,

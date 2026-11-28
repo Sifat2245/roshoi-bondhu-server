@@ -809,7 +809,7 @@ export const postResolvers = {
 
     createComment: async (
       _parent: unknown,
-      args: { postId: string; content: string; parentId?: string },
+      args: { postId: string; content: string; parentId?: string; mentionedUserIds?: string[] },
       context: GraphQLContext
     ) => {
       if (!context.currentUser) {
@@ -819,7 +819,8 @@ export const postResolvers = {
         context.currentUser.id,
         args.postId,
         args.content,
-        args.parentId
+        args.parentId,
+        args.mentionedUserIds || []
       );
     },
 
@@ -1282,6 +1283,15 @@ export const postResolvers = {
       c.createdAt instanceof Date ? c.createdAt.toISOString() : String(c.createdAt || ''),
     updatedAt: (c: any) =>
       c.updatedAt instanceof Date ? c.updatedAt.toISOString() : c.updatedAt ? String(c.updatedAt) : null,
+    mentionedUserIds: (c: any) => (Array.isArray(c.mentionedUserIds) ? c.mentionedUserIds : []),
+    mentionedUsers: async (c: any, _args: unknown, context: GraphQLContext) => {
+      const ids = Array.isArray(c.mentionedUserIds) ? c.mentionedUserIds.filter(Boolean) : [];
+      if (ids.length === 0) return [];
+      return await context.prisma.user.findMany({
+        where: { id: { in: ids }, deletedAt: null, isBanned: false },
+        select: { id: true, name: true, image: true, role: true },
+      });
+    },
     likeCount: (c: any) => c.likeCount ?? c._count?.likes ?? 0,
     hasLiked: (c: any) =>
       typeof c.hasLiked === 'boolean'
@@ -1294,6 +1304,15 @@ export const postResolvers = {
       c.createdAt instanceof Date ? c.createdAt.toISOString() : String(c.createdAt || ''),
     updatedAt: (c: any) =>
       c.updatedAt instanceof Date ? c.updatedAt.toISOString() : c.updatedAt ? String(c.updatedAt) : null,
+    mentionedUserIds: (c: any) => (Array.isArray(c.mentionedUserIds) ? c.mentionedUserIds : []),
+    mentionedUsers: async (c: any, _args: unknown, context: GraphQLContext) => {
+      const ids = Array.isArray(c.mentionedUserIds) ? c.mentionedUserIds.filter(Boolean) : [];
+      if (ids.length === 0) return [];
+      return await context.prisma.user.findMany({
+        where: { id: { in: ids }, deletedAt: null, isBanned: false },
+        select: { id: true, name: true, image: true, role: true },
+      });
+    },
     likeCount: (c: any) => c.likeCount ?? c._count?.likes ?? 0,
     hasLiked: (c: any) =>
       typeof c.hasLiked === 'boolean'

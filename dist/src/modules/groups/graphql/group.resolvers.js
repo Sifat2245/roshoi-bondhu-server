@@ -20,6 +20,29 @@ export const groupResolvers = {
                 createdAt: group.createdAt instanceof Date ? group.createdAt.toISOString() : String(group.createdAt || ''),
             };
         },
+        groupJoinRequests: async (_parent, args, context) => {
+            if (!context.currentUser)
+                throw new Error('Authentication required.');
+            return await GroupService.getGroupJoinRequests(context.currentUser.id, context.currentUser.role, args.groupId);
+        },
+        groupPendingInvitations: async (_parent, args, context) => {
+            if (!context.currentUser)
+                throw new Error('Authentication required.');
+            return await GroupService.getGroupPendingInvitations(context.currentUser.id, context.currentUser.role, args.groupId);
+        },
+        groupInvitePreview: async (_parent, args, context) => {
+            return await GroupService.getGroupInvitePreview(args.slug, args.token, context.currentUser?.id);
+        },
+        groupInviteLink: async (_parent, args, context) => {
+            if (!context.currentUser)
+                throw new Error('Authentication required.');
+            const link = await GroupService.getOrCreateInviteLink(context.currentUser.id, context.currentUser.role, args.groupId);
+            return {
+                ...link,
+                createdAt: link.createdAt instanceof Date ? link.createdAt.toISOString() : String(link.createdAt || ''),
+                expiresAt: link.expiresAt ? new Date(link.expiresAt).toISOString() : null,
+            };
+        },
     },
     Mutation: {
         createGroup: async (_parent, args, context) => {
@@ -30,6 +53,7 @@ export const groupResolvers = {
                 name: args.name,
                 description: args.description,
                 privacy: args.privacy || 'PUBLIC',
+                joinMode: args.joinMode || 'DIRECT',
                 coverImage: args.coverImage,
                 avatar: args.avatar,
                 invitedUserIds: args.invitedUserIds,
@@ -39,7 +63,18 @@ export const groupResolvers = {
             if (!context.currentUser) {
                 throw new Error('Authentication required.');
             }
-            await GroupService.joinGroup(context.currentUser.id, args.groupId);
+            const res = await GroupService.joinGroup(context.currentUser.id, args.groupId);
+            return {
+                success: true,
+                isApproved: Boolean(res.isApproved),
+                status: res.isApproved ? 'JOINED' : 'PENDING_APPROVAL',
+            };
+        },
+        handleGroupJoinRequest: async (_parent, args, context) => {
+            if (!context.currentUser)
+                throw new Error('Authentication required.');
+            const action = args.action.toUpperCase() === 'APPROVE' ? 'APPROVE' : 'REJECT';
+            await GroupService.handleJoinRequest(context.currentUser.id, context.currentUser.role, args.groupId, args.memberId, action);
             return true;
         },
         leaveGroup: async (_parent, args, context) => {
@@ -66,6 +101,56 @@ export const groupResolvers = {
                 throw new Error('Authentication required.');
             }
             return await GroupService.addMember(context.currentUser.id, context.currentUser.role, args.groupId, args.userId, args.role || 'MEMBER');
+        },
+        inviteGroupMember: async (_parent, args, context) => {
+            if (!context.currentUser) {
+                throw new Error('Authentication required.');
+            }
+            return await GroupService.inviteMember(context.currentUser.id, context.currentUser.role, args.groupId, args.userId, args.role || 'MEMBER');
+        },
+        respondGroupInvitation: async (_parent, args, context) => {
+            if (!context.currentUser) {
+                throw new Error('Authentication required.');
+            }
+            const action = args.action.toUpperCase() === 'ACCEPT' ? 'ACCEPT' : 'DECLINE';
+            const res = await GroupService.respondToInvitation(context.currentUser.id, args.invitationId, action);
+            return {
+                success: true,
+                isApproved: Boolean(res.isApproved),
+                status: res.status || (res.isApproved ? 'ACCEPTED' : 'DECLINED'),
+                groupSlug: res.groupSlug || null,
+            };
+        },
+        cancelGroupInvitation: async (_parent, args, context) => {
+            if (!context.currentUser)
+                throw new Error('Authentication required.');
+            return await GroupService.cancelGroupInvitation(context.currentUser.id, context.currentUser.role, args.groupId, args.invitationId);
+        },
+        regenerateGroupInviteLink: async (_parent, args, context) => {
+            if (!context.currentUser)
+                throw new Error('Authentication required.');
+            const link = await GroupService.regenerateInviteLink(context.currentUser.id, context.currentUser.role, args.groupId);
+            return {
+                ...link,
+                createdAt: link.createdAt instanceof Date ? link.createdAt.toISOString() : String(link.createdAt || ''),
+                expiresAt: link.expiresAt ? new Date(link.expiresAt).toISOString() : null,
+            };
+        },
+        revokeGroupInviteLink: async (_parent, args, context) => {
+            if (!context.currentUser)
+                throw new Error('Authentication required.');
+            return await GroupService.revokeInviteLink(context.currentUser.id, context.currentUser.role, args.groupId, args.linkId);
+        },
+        acceptGroupInviteLink: async (_parent, args, context) => {
+            if (!context.currentUser)
+                throw new Error('Authentication required.');
+            const res = await GroupService.acceptGroupInviteLink(context.currentUser.id, args.token);
+            return {
+                success: true,
+                isApproved: Boolean(res.isApproved),
+                status: res.status,
+                groupSlug: res.groupSlug,
+            };
         },
         updateGroupCover: async (_parent, args, context) => {
             if (!context.currentUser) {
@@ -113,6 +198,18 @@ export const groupResolvers = {
             }
             return false;
         },
+        joinMode: (g) => g.joinMode || 'DIRECT',
+        myMembershipStatus: (g, _args, context) => {
+            if (g.myMembershipStatus !== undefined)
+                return g.myMembershipStatus;
+            const effectiveOwnerId = g.ownerId || g.createdById;
+            if (context.currentUser?.id && effectiveOwnerId === context.currentUser.id)
+                return 'APPROVED';
+            if (g.myMembership)
+                return g.myMembership.isApproved ? 'APPROVED' : 'PENDING';
+            return 'NONE';
+        },
+        myPendingInvite: (g) => g.myPendingInvite || null,
         currentUserRole: (g, _args, context) => {
             if (g.currentUserRole !== undefined)
                 return g.currentUserRole;
@@ -120,10 +217,11 @@ export const groupResolvers = {
             if (context.currentUser?.id && effectiveOwnerId === context.currentUser.id)
                 return 'ADMIN';
             if (g.myMembership)
-                return g.myMembership.role;
+                return g.myMembership.isApproved ? g.myMembership.role : null;
             if (context.currentUser?.id) {
                 if (g.members && Array.isArray(g.members)) {
-                    const m = g.members.find((x) => x.userId === context.currentUser?.id || x.user?.id === context.currentUser?.id);
+                    const m = g.members.find((x) => (x.userId === context.currentUser?.id || x.user?.id === context.currentUser?.id) &&
+                        x.isApproved);
                     return m?.role || null;
                 }
             }
@@ -135,8 +233,9 @@ export const groupResolvers = {
             const effectiveOwnerId = g.ownerId || g.createdById;
             if (context.currentUser?.id && effectiveOwnerId === context.currentUser.id)
                 return true;
-            if (g.myMembership && ['ADMIN', 'MODERATOR'].includes(g.myMembership.role))
+            if (g.myMembership?.isApproved && ['ADMIN', 'MODERATOR'].includes(g.myMembership.role)) {
                 return true;
+            }
             return false;
         },
         createdBy: (g) => g.createdBy || null,

@@ -71,3 +71,29 @@ enum FriendshipRequestStatus {
   CANCELLED
 }
 
+enum NotificationType {
+  FRIEND_REQUEST
+  FRIEND_ACCEPT
+  GROUP_INVITE
+  GROUP_JOIN_REQUEST
+  GROUP_JOIN_APPROVED
+  POST_LIKE
+  COMMENT_LIKE
+  POST_COMMENT
+  COMMENT_REPLY
+  MENTION
+  SYSTEM
+}
+
+enum GroupJoinMode {
+  DIRECT
+  ADMIN_APPROVAL
+}
+
+enum GroupInvitationStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+  CANCELLED
+}
+

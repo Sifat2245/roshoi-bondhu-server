@@ -681,7 +681,7 @@ export const postResolvers = {
             if (!context.currentUser) {
                 throw new Error('Authentication required.');
             }
-            return await PostService.createComment(context.currentUser.id, args.postId, args.content, args.parentId);
+            return await PostService.createComment(context.currentUser.id, args.postId, args.content, args.parentId, args.mentionedUserIds || []);
         },
         updateComment: async (_parent, args, context) => {
             if (!context.currentUser) {
@@ -1025,6 +1025,16 @@ export const postResolvers = {
     PostComment: {
         createdAt: (c) => c.createdAt instanceof Date ? c.createdAt.toISOString() : String(c.createdAt || ''),
         updatedAt: (c) => c.updatedAt instanceof Date ? c.updatedAt.toISOString() : c.updatedAt ? String(c.updatedAt) : null,
+        mentionedUserIds: (c) => (Array.isArray(c.mentionedUserIds) ? c.mentionedUserIds : []),
+        mentionedUsers: async (c, _args, context) => {
+            const ids = Array.isArray(c.mentionedUserIds) ? c.mentionedUserIds.filter(Boolean) : [];
+            if (ids.length === 0)
+                return [];
+            return await context.prisma.user.findMany({
+                where: { id: { in: ids }, deletedAt: null, isBanned: false },
+                select: { id: true, name: true, image: true, role: true },
+            });
+        },
         likeCount: (c) => c.likeCount ?? c._count?.likes ?? 0,
         hasLiked: (c) => typeof c.hasLiked === 'boolean'
             ? c.hasLiked
@@ -1033,6 +1043,16 @@ export const postResolvers = {
     PostCommentReply: {
         createdAt: (c) => c.createdAt instanceof Date ? c.createdAt.toISOString() : String(c.createdAt || ''),
         updatedAt: (c) => c.updatedAt instanceof Date ? c.updatedAt.toISOString() : c.updatedAt ? String(c.updatedAt) : null,
+        mentionedUserIds: (c) => (Array.isArray(c.mentionedUserIds) ? c.mentionedUserIds : []),
+        mentionedUsers: async (c, _args, context) => {
+            const ids = Array.isArray(c.mentionedUserIds) ? c.mentionedUserIds.filter(Boolean) : [];
+            if (ids.length === 0)
+                return [];
+            return await context.prisma.user.findMany({
+                where: { id: { in: ids }, deletedAt: null, isBanned: false },
+                select: { id: true, name: true, image: true, role: true },
+            });
+        },
         likeCount: (c) => c.likeCount ?? c._count?.likes ?? 0,
         hasLiked: (c) => typeof c.hasLiked === 'boolean'
             ? c.hasLiked

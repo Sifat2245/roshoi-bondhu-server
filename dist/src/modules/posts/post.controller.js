@@ -55,8 +55,8 @@ const toggleLike = CatchAsync(async (req, res) => {
 });
 const createComment = CatchAsync(async (req, res) => {
     const postId = req.params.id;
-    const { content, parentId } = req.body;
-    const result = await PostService.createComment(req.user.id, postId, content, parentId);
+    const { content, parentId, mentionedUserIds } = req.body;
+    const result = await PostService.createComment(req.user.id, postId, content, parentId, Array.isArray(mentionedUserIds) ? mentionedUserIds : []);
     sendResponse(res, {
         statusCode: 201,
         success: true,

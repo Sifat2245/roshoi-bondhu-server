@@ -1,6 +1,7 @@
 import prisma from '../../lib/prisma.js';
 import { paginationUtils } from '../../shared/pagination/pagination.js';
 import { FriendsService } from '../friends/friends.service.js';
+import { NotificationService } from '../notifications/notification.service.js';
 
 const db = prisma as any;
 
@@ -695,6 +696,13 @@ const toggleLike = async (userId: string, postId: string) => {
   }
 
   const likeCount = await prisma.like.count({ where: { postId } });
+
+  if (liked) {
+    await NotificationService.notifyPostLike(userId, postId).catch(() => {});
+  } else {
+    await NotificationService.handlePostUnlike(userId, postId).catch(() => {});
+  }
+
   return { liked, likeCount };
 };
 
@@ -731,10 +739,20 @@ const toggleCommentLike = async (userId: string, commentId: string) => {
     where: { commentId },
   });
 
+  if (liked) {
+    await NotificationService.notifyCommentLike(userId, commentId).catch(() => {});
+  }
+
   return { liked, likeCount };
 };
 
-const createComment = async (userId: string, postId: string, content: string, parentId?: string) => {
+const createComment = async (
+  userId: string,
+  postId: string,
+  content: string,
+  parentId?: string,
+  mentionedUserIds: string[] = []
+) => {
   if (!content || !content.trim()) throw new Error('Comment content cannot be empty.');
 
   const post = await prisma.post.findUnique({
@@ -750,13 +768,20 @@ const createComment = async (userId: string, postId: string, content: string, pa
     throw new Error('Commenting has been turned off for this post.');
   }
 
-  return await prisma.comment.create({
+  const resolvedMentionIds = await NotificationService.resolveMentionedUserIdsFromContent(
+    content.trim(),
+    mentionedUserIds,
+    userId
+  );
+
+  const created = await prisma.comment.create({
     data: {
       userId,
       postId,
       parentId: parentId || null,
       content: content.trim(),
-    },
+      mentionedUserIds: resolvedMentionIds,
+    } as any,
     include: {
       user: {
         select: { id: true, name: true, image: true, role: true },
@@ -768,6 +793,17 @@ const createComment = async (userId: string, postId: string, content: string, pa
       },
     },
   });
+
+  await NotificationService.notifyCommentAndMentions({
+    actorId: userId,
+    postId,
+    commentId: created.id,
+    parentId,
+    content: created.content,
+    mentionedUserIds: resolvedMentionIds,
+  }).catch(() => {});
+
+  return created;
 };
 
 const deletePost = async (userId: string, userRole: string, postId: string) => {

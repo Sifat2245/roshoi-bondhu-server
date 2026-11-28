@@ -30,6 +30,62 @@ export const groupResolvers = {
         createdAt: group.createdAt instanceof Date ? group.createdAt.toISOString() : String(group.createdAt || ''),
       };
     },
+
+    groupJoinRequests: async (
+      _parent: unknown,
+      args: { groupId: string },
+      context: GraphQLContext
+    ) => {
+      if (!context.currentUser) throw new Error('Authentication required.');
+      return await GroupService.getGroupJoinRequests(
+        context.currentUser.id,
+        context.currentUser.role,
+        args.groupId
+      );
+    },
+
+    groupPendingInvitations: async (
+      _parent: unknown,
+      args: { groupId: string },
+      context: GraphQLContext
+    ) => {
+      if (!context.currentUser) throw new Error('Authentication required.');
+      return await GroupService.getGroupPendingInvitations(
+        context.currentUser.id,
+        context.currentUser.role,
+        args.groupId
+      );
+    },
+
+    groupInvitePreview: async (
+      _parent: unknown,
+      args: { slug: string; token: string },
+      context: GraphQLContext
+    ) => {
+      return await GroupService.getGroupInvitePreview(
+        args.slug,
+        args.token,
+        context.currentUser?.id
+      );
+    },
+
+    groupInviteLink: async (
+      _parent: unknown,
+      args: { groupId: string },
+      context: GraphQLContext
+    ) => {
+      if (!context.currentUser) throw new Error('Authentication required.');
+      const link = await GroupService.getOrCreateInviteLink(
+        context.currentUser.id,
+        context.currentUser.role,
+        args.groupId
+      );
+      return {
+        ...link,
+        createdAt: link.createdAt instanceof Date ? link.createdAt.toISOString() : String(link.createdAt || ''),
+        expiresAt: link.expiresAt ? new Date(link.expiresAt).toISOString() : null,
+      };
+    },
   },
 
   Mutation: {
@@ -39,6 +95,7 @@ export const groupResolvers = {
         name: string;
         description?: string;
         privacy?: string;
+        joinMode?: string;
         coverImage?: string;
         avatar?: string;
         invitedUserIds?: string[];
@@ -52,6 +109,7 @@ export const groupResolvers = {
         name: args.name,
         description: args.description,
         privacy: (args.privacy as any) || 'PUBLIC',
+        joinMode: (args.joinMode as any) || 'DIRECT',
         coverImage: args.coverImage,
         avatar: args.avatar,
         invitedUserIds: args.invitedUserIds,
@@ -66,7 +124,28 @@ export const groupResolvers = {
       if (!context.currentUser) {
         throw new Error('Authentication required.');
       }
-      await GroupService.joinGroup(context.currentUser.id, args.groupId);
+      const res = await GroupService.joinGroup(context.currentUser.id, args.groupId);
+      return {
+        success: true,
+        isApproved: Boolean(res.isApproved),
+        status: res.isApproved ? 'JOINED' : 'PENDING_APPROVAL',
+      };
+    },
+
+    handleGroupJoinRequest: async (
+      _parent: unknown,
+      args: { groupId: string; memberId: string; action: string },
+      context: GraphQLContext
+    ) => {
+      if (!context.currentUser) throw new Error('Authentication required.');
+      const action = args.action.toUpperCase() === 'APPROVE' ? 'APPROVE' : 'REJECT';
+      await GroupService.handleJoinRequest(
+        context.currentUser.id,
+        context.currentUser.role,
+        args.groupId,
+        args.memberId,
+        action
+      );
       return true;
     },
 
@@ -130,6 +209,109 @@ export const groupResolvers = {
         args.userId,
         (args.role as any) || 'MEMBER'
       );
+    },
+
+    inviteGroupMember: async (
+      _parent: unknown,
+      args: { groupId: string; userId: string; role?: string },
+      context: GraphQLContext
+    ) => {
+      if (!context.currentUser) {
+        throw new Error('Authentication required.');
+      }
+      return await GroupService.inviteMember(
+        context.currentUser.id,
+        context.currentUser.role,
+        args.groupId,
+        args.userId,
+        (args.role as any) || 'MEMBER'
+      );
+    },
+
+    respondGroupInvitation: async (
+      _parent: unknown,
+      args: { invitationId: string; action: string },
+      context: GraphQLContext
+    ) => {
+      if (!context.currentUser) {
+        throw new Error('Authentication required.');
+      }
+      const action = args.action.toUpperCase() === 'ACCEPT' ? 'ACCEPT' : 'DECLINE';
+      const res = await GroupService.respondToInvitation(
+        context.currentUser.id,
+        args.invitationId,
+        action
+      );
+      return {
+        success: true,
+        isApproved: Boolean(res.isApproved),
+        status: res.status || (res.isApproved ? 'ACCEPTED' : 'DECLINED'),
+        groupSlug: res.groupSlug || null,
+      };
+    },
+
+    cancelGroupInvitation: async (
+      _parent: unknown,
+      args: { groupId: string; invitationId: string },
+      context: GraphQLContext
+    ) => {
+      if (!context.currentUser) throw new Error('Authentication required.');
+      return await GroupService.cancelGroupInvitation(
+        context.currentUser.id,
+        context.currentUser.role,
+        args.groupId,
+        args.invitationId
+      );
+    },
+
+    regenerateGroupInviteLink: async (
+      _parent: unknown,
+      args: { groupId: string },
+      context: GraphQLContext
+    ) => {
+      if (!context.currentUser) throw new Error('Authentication required.');
+      const link = await GroupService.regenerateInviteLink(
+        context.currentUser.id,
+        context.currentUser.role,
+        args.groupId
+      );
+      return {
+        ...link,
+        createdAt: link.createdAt instanceof Date ? link.createdAt.toISOString() : String(link.createdAt || ''),
+        expiresAt: link.expiresAt ? new Date(link.expiresAt).toISOString() : null,
+      };
+    },
+
+    revokeGroupInviteLink: async (
+      _parent: unknown,
+      args: { groupId: string; linkId?: string },
+      context: GraphQLContext
+    ) => {
+      if (!context.currentUser) throw new Error('Authentication required.');
+      return await GroupService.revokeInviteLink(
+        context.currentUser.id,
+        context.currentUser.role,
+        args.groupId,
+        args.linkId
+      );
+    },
+
+    acceptGroupInviteLink: async (
+      _parent: unknown,
+      args: { token: string },
+      context: GraphQLContext
+    ) => {
+      if (!context.currentUser) throw new Error('Authentication required.');
+      const res = await GroupService.acceptGroupInviteLink(
+        context.currentUser.id,
+        args.token
+      );
+      return {
+        success: true,
+        isApproved: Boolean(res.isApproved),
+        status: res.status,
+        groupSlug: res.groupSlug,
+      };
     },
 
     updateGroupCover: async (
@@ -216,15 +398,26 @@ export const groupResolvers = {
       }
       return false;
     },
+    joinMode: (g: any) => g.joinMode || 'DIRECT',
+    myMembershipStatus: (g: any, _args: unknown, context: GraphQLContext) => {
+      if (g.myMembershipStatus !== undefined) return g.myMembershipStatus;
+      const effectiveOwnerId = g.ownerId || g.createdById;
+      if (context.currentUser?.id && effectiveOwnerId === context.currentUser.id) return 'APPROVED';
+      if (g.myMembership) return g.myMembership.isApproved ? 'APPROVED' : 'PENDING';
+      return 'NONE';
+    },
+    myPendingInvite: (g: any) => g.myPendingInvite || null,
     currentUserRole: (g: any, _args: unknown, context: GraphQLContext) => {
       if (g.currentUserRole !== undefined) return g.currentUserRole;
       const effectiveOwnerId = g.ownerId || g.createdById;
       if (context.currentUser?.id && effectiveOwnerId === context.currentUser.id) return 'ADMIN';
-      if (g.myMembership) return g.myMembership.role;
+      if (g.myMembership) return g.myMembership.isApproved ? g.myMembership.role : null;
       if (context.currentUser?.id) {
         if (g.members && Array.isArray(g.members)) {
           const m = g.members.find(
-            (x: any) => x.userId === context.currentUser?.id || x.user?.id === context.currentUser?.id
+            (x: any) =>
+              (x.userId === context.currentUser?.id || x.user?.id === context.currentUser?.id) &&
+              x.isApproved
           );
           return m?.role || null;
         }
@@ -235,7 +428,9 @@ export const groupResolvers = {
       if (g.canModerate !== undefined) return g.canModerate;
       const effectiveOwnerId = g.ownerId || g.createdById;
       if (context.currentUser?.id && effectiveOwnerId === context.currentUser.id) return true;
-      if (g.myMembership && ['ADMIN', 'MODERATOR'].includes(g.myMembership.role)) return true;
+      if (g.myMembership?.isApproved && ['ADMIN', 'MODERATOR'].includes(g.myMembership.role)) {
+        return true;
+      }
       return false;
     },
     createdBy: (g: any) => g.createdBy || null,

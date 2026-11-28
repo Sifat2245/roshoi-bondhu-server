@@ -1,4 +1,5 @@
 import prisma from '../../lib/prisma.js';
+import { NotificationService } from '../notifications/notification.service.js';
 export function getCanonicalPair(u1, u2) {
     return u1 < u2 ? { userLowId: u1, userHighId: u2 } : { userLowId: u2, userHighId: u1 };
 }
@@ -480,6 +481,10 @@ export class FriendsService {
                     create: { userLowId, userHighId },
                 }),
             ]);
+            await Promise.all([
+                NotificationService.resolveFriendRequestNotification(senderId, receiverId, 'ACCEPTED'),
+                NotificationService.notifyFriendAccepted(senderId, receiverId),
+            ]).catch(() => { });
             return {
                 success: true,
                 status: 'FRIENDS',
@@ -487,11 +492,12 @@ export class FriendsService {
             };
         }
         // Upsert outgoing request
-        await prisma.friendshipRequest.upsert({
+        const requestRecord = await prisma.friendshipRequest.upsert({
             where: { senderId_receiverId: { senderId, receiverId } },
             update: { status: 'PENDING' },
             create: { senderId, receiverId, status: 'PENDING' },
         });
+        await NotificationService.notifyFriendRequest(senderId, receiverId, requestRecord.id).catch(() => { });
         return {
             success: true,
             status: 'REQUEST_SENT',
@@ -524,6 +530,10 @@ export class FriendsService {
                 create: { userLowId, userHighId },
             }),
         ]);
+        await Promise.all([
+            NotificationService.resolveFriendRequestNotification(currentUserId, request.senderId, 'ACCEPTED'),
+            NotificationService.notifyFriendAccepted(currentUserId, request.senderId),
+        ]).catch(() => { });
         return { success: true, message: 'Friend request accepted' };
     }
     /**
@@ -544,6 +554,7 @@ export class FriendsService {
             where: { id: request.id },
             data: { status: 'DECLINED' },
         });
+        await NotificationService.resolveFriendRequestNotification(currentUserId, request.senderId, 'DECLINED').catch(() => { });
         return { success: true, message: 'Friend request declined' };
     }
     /**
@@ -563,6 +574,7 @@ export class FriendsService {
                 where: { id: request.id },
                 data: { status: 'CANCELLED' },
             });
+            await NotificationService.resolveFriendRequestNotification(receiverId, senderId, 'CANCELLED').catch(() => { });
         }
         return { success: true, message: 'Friend request cancelled' };
     }

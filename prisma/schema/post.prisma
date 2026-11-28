@@ -30,6 +30,7 @@ model Post {
   comments        Comment[]
   poll            Poll?
   hiddenBy        UserHiddenPost[]
+  notifications   Notification[]
 
   isCommentDisabled Boolean   @default(false)
 
@@ -65,10 +66,12 @@ model Comment {
   post      Post          @relation(fields: [postId], references: [id], onDelete: Cascade)
   parentId  String?
   parent    Comment?      @relation("CommentReplies", fields: [parentId], references: [id], onDelete: Cascade)
-  replies   Comment[]     @relation("CommentReplies")
-  likes     CommentLike[]
-  content   String        @db.Text
-  createdAt DateTime      @default(now())
+  replies          Comment[]      @relation("CommentReplies")
+  likes            CommentLike[]
+  notifications    Notification[]
+  content          String         @db.Text
+  mentionedUserIds String[]       @default([])
+  createdAt        DateTime       @default(now())
   updatedAt DateTime      @updatedAt
 
   @@index([postId])

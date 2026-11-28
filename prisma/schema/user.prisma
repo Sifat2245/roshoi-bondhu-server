@@ -50,8 +50,14 @@ model User {
   friendshipsAsHigh      Friendship[]        @relation("FriendshipsHigh")
   blocksIssued           UserBlock[]         @relation("BlocksIssued")
   blocksReceived         UserBlock[]         @relation("BlocksReceived")
-  hiddenPosts            UserHiddenPost[]
-  recentSearches         RecentSearch[]
+  hiddenPosts              UserHiddenPost[]
+  recentSearches           RecentSearch[]
+  notificationsReceived    Notification[]    @relation("NotificationsReceived")
+  notificationsActed       Notification[]    @relation("NotificationsActed")
+  notificationActors       NotificationActor[]
+  groupInvitationsSent     GroupInvitation[] @relation("GroupInvitationsSent")
+  groupInvitationsReceived GroupInvitation[] @relation("GroupInvitationsReceived")
+  groupInviteLinksCreated  GroupInviteLink[] @relation("GroupInviteLinksCreated")
 }
 
 model Session {

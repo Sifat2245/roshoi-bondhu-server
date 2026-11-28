@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { UserController } from './user.controller.js';
 import { AuthController } from '../auth/auth.controller.js';
 import { requireAuth, optionalAuth } from '../../middleware/auth.middleware.js';
+import { notificationRoutes } from '../notifications/notification.routes.js';
 
 const router = Router();
 
@@ -16,9 +17,7 @@ router.post('/deactivate', requireAuth, AuthController.deactivateAccount);
 router.post('/delete', requireAuth, AuthController.deleteAccount);
 router.post('/delete-account', requireAuth, AuthController.deleteAccount);
 
-router.get('/notifications', optionalAuth, (_req, res) => {
-  res.json({ success: true, data: [] });
-});
+router.use('/notifications', notificationRoutes);
 
 // Target user routes
 router.get('/:id', optionalAuth, UserController.getUserProfile);

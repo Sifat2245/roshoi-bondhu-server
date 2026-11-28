@@ -44,6 +44,8 @@ export const postTypeDefs = /* GraphQL */ `
     userId: String
     user: PostAuthor
     content: String!
+    mentionedUserIds: [String!]
+    mentionedUsers: [PostAuthor!]
     likeCount: Int
     hasLiked: Boolean
     createdAt: String!
@@ -57,6 +59,8 @@ export const postTypeDefs = /* GraphQL */ `
     user: PostAuthor
     parentId: ID
     content: String!
+    mentionedUserIds: [String!]
+    mentionedUsers: [PostAuthor!]
     likeCount: Int
     hasLiked: Boolean
     replies: [PostCommentReply!]
@@ -236,7 +240,7 @@ export const postTypeDefs = /* GraphQL */ `
     toggleLike(postId: ID!): LikeResult!
     toggleCommentLike(commentId: ID!): LikeResult!
     toggleCommentsDisabled(postId: ID!): Post!
-    createComment(postId: ID!, content: String!, parentId: ID): PostComment!
+    createComment(postId: ID!, content: String!, parentId: ID, mentionedUserIds: [ID!]): PostComment!
     updateComment(id: ID!, content: String!): PostComment!
     deleteComment(id: ID!): Boolean!
     votePoll(pollId: ID!, optionId: ID!): Poll!

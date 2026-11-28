@@ -1,0 +1,52 @@
+model Notification {
+  id                  String             @id @default(cuid())
+  recipientId         String
+  recipient           User               @relation("NotificationsReceived", fields: [recipientId], references: [id], onDelete: Cascade)
+  actorId             String?
+  actor               User?              @relation("NotificationsActed", fields: [actorId], references: [id], onDelete: SetNull)
+  type                NotificationType
+  aggregateKey        String?
+  actorCount          Int                @default(1)
+  title               String?
+  message             String
+  link                String?
+  iconType            String             @default("SYSTEM")
+  actionable          Boolean            @default(false)
+  actionStatus        String?
+  postId              String?
+  post                Post?              @relation(fields: [postId], references: [id], onDelete: Cascade)
+  commentId           String?
+  comment             Comment?           @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  groupId             String?
+  group               Group?             @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  invitationId        String?
+  invitation          GroupInvitation?   @relation(fields: [invitationId], references: [id], onDelete: Cascade)
+  friendshipRequestId String?
+  friendshipRequest   FriendshipRequest? @relation(fields: [friendshipRequestId], references: [id], onDelete: Cascade)
+  metadata            Json?
+  readAt              DateTime?
+  dismissedAt         DateTime?
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+
+  actors NotificationActor[]
+
+  @@unique([recipientId, aggregateKey])
+  @@index([recipientId, dismissedAt, createdAt(sort: Desc)])
+  @@index([recipientId, readAt, dismissedAt])
+  @@map("notifications")
+}
+
+model NotificationActor {
+  id             String       @id @default(cuid())
+  notificationId String
+  notification   Notification @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+  actorId        String
+  actor          User         @relation(fields: [actorId], references: [id], onDelete: Cascade)
+  actedAt        DateTime     @default(now())
+
+  @@unique([notificationId, actorId])
+  @@index([notificationId, actedAt(sort: Desc)])
+  @@map("notification_actors")
+}
+

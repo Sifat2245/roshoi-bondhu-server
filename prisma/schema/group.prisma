@@ -7,6 +7,7 @@ model Group {
   avatar                 String?
   privacy                GroupPrivacy           @default(PUBLIC)
   discoverability        GroupDiscoverability   @default(VISIBLE)
+  joinMode               GroupJoinMode          @default(DIRECT)
   status                 GroupStatus            @default(ACTIVE)
   requiresPostApproval   Boolean                @default(false)
   challengeCreatorPolicy ChallengeCreatorPolicy @default(STAFF)
@@ -18,7 +19,10 @@ model Group {
   createdBy              User?                  @relation("GroupCreator", fields: [createdById], references: [id], onDelete: SetNull)
 
   members                GroupMember[]
+  invitations            GroupInvitation[]
+  inviteLinks            GroupInviteLink[]
   posts                  Post[]
+  notifications          Notification[]
 
   createdAt              DateTime               @default(now())
   updatedAt              DateTime               @updatedAt
@@ -40,5 +44,44 @@ model GroupMember {
   @@unique([groupId, userId])
   @@index([groupId])
   @@index([userId])
+}
+
+model GroupInvitation {
+  id          String                @id @default(cuid())
+  groupId     String
+  group       Group                 @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  inviterId   String
+  inviter     User                  @relation("GroupInvitationsSent", fields: [inviterId], references: [id], onDelete: Cascade)
+  inviteeId   String
+  invitee     User                  @relation("GroupInvitationsReceived", fields: [inviteeId], references: [id], onDelete: Cascade)
+  role        GroupRole             @default(MEMBER)
+  status      GroupInvitationStatus @default(PENDING)
+  respondedAt DateTime?
+  createdAt   DateTime              @default(now())
+  updatedAt   DateTime              @updatedAt
+
+  notifications Notification[]
+
+  @@unique([groupId, inviteeId])
+  @@index([inviteeId, status])
+  @@index([groupId, status])
+  @@map("group_invitations")
+}
+
+model GroupInviteLink {
+  id          String    @id @default(cuid())
+  groupId     String
+  group       Group     @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  createdById String?
+  createdBy   User?     @relation("GroupInviteLinksCreated", fields: [createdById], references: [id], onDelete: SetNull)
+  token       String    @unique
+  isStaffLink Boolean   @default(false)
+  expiresAt   DateTime?
+  revokedAt   DateTime?
+  useCount    Int       @default(0)
+  createdAt   DateTime  @default(now())
+
+  @@index([groupId, revokedAt])
+  @@map("group_invite_links")
 }
 
