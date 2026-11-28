@@ -22,6 +22,14 @@ export const env = {
     SMTP_USER: process.env.SMTP_USER,
     SMTP_PASS: process.env.SMTP_PASS,
     SMTP_FROM: process.env.SMTP_FROM || '"Heshel • হেঁশেল" <no-reply@heshel.com>',
+    SOCKET_ENABLED: process.env.SOCKET_ENABLED !== 'false',
+    SOCKET_PATH: process.env.SOCKET_PATH || '/socket.io',
+    SOCKET_CORS_ORIGIN: process.env.SOCKET_CORS_ORIGIN || process.env.CLIENT_URL || 'http://localhost:5173',
+    SOCKET_PING_INTERVAL: parseInt(process.env.SOCKET_PING_INTERVAL || '25000', 10),
+    SOCKET_PING_TIMEOUT: parseInt(process.env.SOCKET_PING_TIMEOUT || '20000', 10),
+    VAPID_PUBLIC_KEY: process.env.VAPID_PUBLIC_KEY,
+    VAPID_PRIVATE_KEY: process.env.VAPID_PRIVATE_KEY,
+    VAPID_SUBJECT: process.env.VAPID_SUBJECT,
 };
 // Strict production validation: abort startup if essential secrets are missing or using dev fallbacks
 if (env.NODE_ENV === 'production') {

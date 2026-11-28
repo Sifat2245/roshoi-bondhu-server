@@ -4,10 +4,11 @@ import prisma from '../lib/prisma.js';
 import jwtUtils from '../shared/utils/jwt.js';
 import cookieUtils from '../shared/utils/cookie.js';
 import { env } from '../config/env.js';
-const resolveUserFromHeaders = async (req) => {
-    // 1. Try JWT from Authorization: Bearer <token>
+export const resolveUserFromHeaders = async (req, overrideToken) => {
+    // 1. Try explicit token or JWT from Authorization: Bearer <token>
     const authHeader = req.headers.authorization;
-    let token = authHeader && authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : null;
+    let token = overrideToken ||
+        (authHeader && authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : null);
     // 2. Fallback to accessToken cookie
     if (!token) {
         token = cookieUtils.getCookie(req, 'accessToken') || null;
@@ -162,6 +163,7 @@ export const requireRole = (allowedRoles = ['ADMIN']) => {
     };
 };
 export default {
+    resolveUserFromHeaders,
     requireAuth,
     optionalAuth,
     requireRole,

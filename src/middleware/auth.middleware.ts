@@ -1,3 +1,4 @@
+import type { IncomingMessage } from 'node:http';
 import type { Request, Response, NextFunction } from 'express';
 import { fromNodeHeaders } from 'better-auth/node';
 import auth from '../lib/auth.js';
@@ -27,14 +28,19 @@ declare global {
   }
 }
 
-const resolveUserFromHeaders = async (req: Request): Promise<AuthenticatedUser | null> => {
-  // 1. Try JWT from Authorization: Bearer <token>
+export const resolveUserFromHeaders = async (
+  req: IncomingMessage & { session?: any },
+  overrideToken?: string | null
+): Promise<AuthenticatedUser | null> => {
+  // 1. Try explicit token or JWT from Authorization: Bearer <token>
   const authHeader = req.headers.authorization;
-  let token = authHeader && authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : null;
+  let token =
+    overrideToken ||
+    (authHeader && authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : null);
 
   // 2. Fallback to accessToken cookie
   if (!token) {
-    token = cookieUtils.getCookie(req, 'accessToken') || null;
+    token = cookieUtils.getCookie(req as Request, 'accessToken') || null;
   }
 
   if (token) {
@@ -193,6 +199,7 @@ export const requireRole = (allowedRoles: ('USER' | 'MODERATOR' | 'ADMIN')[] = [
 };
 
 export default {
+  resolveUserFromHeaders,
   requireAuth,
   optionalAuth,
   requireRole,

@@ -25,6 +25,16 @@ export interface EnvConfig {
   SMTP_USER?: string;
   SMTP_PASS?: string;
   SMTP_FROM: string;
+  // Realtime Socket.IO
+  SOCKET_ENABLED: boolean;
+  SOCKET_PATH: string;
+  SOCKET_CORS_ORIGIN: string;
+  SOCKET_PING_INTERVAL: number;
+  SOCKET_PING_TIMEOUT: number;
+  // Optional Web Push (VAPID)
+  VAPID_PUBLIC_KEY?: string;
+  VAPID_PRIVATE_KEY?: string;
+  VAPID_SUBJECT?: string;
 }
 
 export const env: EnvConfig = {
@@ -49,6 +59,14 @@ export const env: EnvConfig = {
   SMTP_USER: process.env.SMTP_USER,
   SMTP_PASS: process.env.SMTP_PASS,
   SMTP_FROM: process.env.SMTP_FROM || '"Heshel • হেঁশেল" <no-reply@heshel.com>',
+  SOCKET_ENABLED: process.env.SOCKET_ENABLED !== 'false',
+  SOCKET_PATH: process.env.SOCKET_PATH || '/socket.io',
+  SOCKET_CORS_ORIGIN: process.env.SOCKET_CORS_ORIGIN || process.env.CLIENT_URL || 'http://localhost:5173',
+  SOCKET_PING_INTERVAL: parseInt(process.env.SOCKET_PING_INTERVAL || '25000', 10),
+  SOCKET_PING_TIMEOUT: parseInt(process.env.SOCKET_PING_TIMEOUT || '20000', 10),
+  VAPID_PUBLIC_KEY: process.env.VAPID_PUBLIC_KEY,
+  VAPID_PRIVATE_KEY: process.env.VAPID_PRIVATE_KEY,
+  VAPID_SUBJECT: process.env.VAPID_SUBJECT,
 };
 
 // Strict production validation: abort startup if essential secrets are missing or using dev fallbacks
