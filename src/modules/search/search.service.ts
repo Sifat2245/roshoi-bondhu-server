@@ -1,5 +1,6 @@
 import prisma from '../../lib/prisma.js';
 import { FriendsService } from '../friends/friends.service.js';
+import { PostService } from '../posts/post.service.js';
 
 export interface PostSearchFilters {
   recentPosts?: boolean;
@@ -595,6 +596,8 @@ export class SearchService {
             slug: true,
             avatar: true,
             privacy: true,
+            ownerId: true,
+            createdById: true,
           },
         },
         originalPost: {
@@ -640,7 +643,9 @@ export class SearchService {
       },
     });
 
-    const formattedPosts = posts.map((post: any) => ({
+    const postsWithRoles = await PostService.attachAuthorGroupRoles(posts, currentUserId);
+
+    const formattedPosts = postsWithRoles.map((post: any) => ({
       ...post,
       likeCount: post._count?.likes ?? 0,
       commentCount: post._count?.comments ?? 0,

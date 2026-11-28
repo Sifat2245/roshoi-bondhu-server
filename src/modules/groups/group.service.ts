@@ -7,9 +7,24 @@ interface CreateGroupInput {
   coverImage?: string;
   avatar?: string;
   privacy?: 'PUBLIC' | 'PRIVATE';
+  discoverability?: 'VISIBLE' | 'HIDDEN';
   requiresPostApproval?: boolean;
   invitedUserIds?: string[];
 }
+
+interface UpdateGroupSettingsInput {
+  name?: string;
+  description?: string | null;
+  coverImage?: string | null;
+  avatar?: string | null;
+  privacy?: 'PUBLIC' | 'PRIVATE';
+  discoverability?: 'VISIBLE' | 'HIDDEN';
+  requiresPostApproval?: boolean;
+  challengeCreatorPolicy?: 'STAFF' | 'MEMBERS';
+}
+
+const getEffectiveOwnerId = (group: { ownerId?: string | null; createdById?: string | null }) =>
+  group.ownerId || group.createdById || null;
 
 const createGroup = async (userId: string, data: CreateGroupInput) => {
   const {
@@ -18,6 +33,7 @@ const createGroup = async (userId: string, data: CreateGroupInput) => {
     coverImage,
     avatar,
     privacy = 'PUBLIC',
+    discoverability = 'VISIBLE',
     requiresPostApproval = false,
     invitedUserIds = [],
   } = data;
@@ -51,7 +67,9 @@ const createGroup = async (userId: string, data: CreateGroupInput) => {
       coverImage,
       avatar,
       privacy,
+      discoverability,
       requiresPostApproval: Boolean(requiresPostApproval),
+      ownerId: userId,
       createdById: userId,
       members: {
         create: [
@@ -69,6 +87,9 @@ const createGroup = async (userId: string, data: CreateGroupInput) => {
       },
     },
     include: {
+      owner: {
+        select: { id: true, name: true, image: true },
+      },
       createdBy: {
         select: { id: true, name: true, image: true },
       },
@@ -88,28 +109,53 @@ const createGroup = async (userId: string, data: CreateGroupInput) => {
 };
 
 const getGroups = async (search?: string, myGroups?: boolean, currentUserId?: string) => {
-  const where: any = {};
+  const andConditions: any[] = [
+    { status: { in: ['ACTIVE', 'PAUSED'] } },
+  ];
 
   if (search) {
-    where.OR = [
-      { name: { contains: search, mode: 'insensitive' } },
-      { description: { contains: search, mode: 'insensitive' } },
-    ];
+    andConditions.push({
+      OR: [
+        { name: { contains: search, mode: 'insensitive' } },
+        { description: { contains: search, mode: 'insensitive' } },
+      ],
+    });
   }
 
   if (myGroups && currentUserId) {
-    where.OR = [
-      { createdById: currentUserId },
-      {
-        members: {
-          some: {
-            userId: currentUserId,
-            isApproved: true,
+    andConditions.push({
+      OR: [
+        { ownerId: currentUserId },
+        { createdById: currentUserId },
+        {
+          members: {
+            some: {
+              userId: currentUserId,
+              isApproved: true,
+            },
           },
         },
-      },
-    ];
+      ],
+    });
+  } else {
+    andConditions.push({
+      OR: [
+        { discoverability: 'VISIBLE' },
+        ...(currentUserId
+          ? [
+              { ownerId: currentUserId },
+              {
+                members: {
+                  some: { userId: currentUserId, isApproved: true },
+                },
+              },
+            ]
+          : []),
+      ],
+    });
   }
+
+  const where = { AND: andConditions };
 
   const groups = await prisma.group.findMany({
     where,
@@ -120,6 +166,9 @@ const getGroups = async (search?: string, myGroups?: boolean, currentUserId?: st
           members: { where: { isApproved: true } },
           posts: { where: { status: 'PUBLISHED' } },
         },
+      },
+      owner: {
+        select: { id: true, name: true, image: true },
       },
       createdBy: {
         select: { id: true, name: true, image: true },
@@ -135,6 +184,7 @@ const getGroups = async (search?: string, myGroups?: boolean, currentUserId?: st
 
   return groups.map((g: any) => ({
     ...g,
+    ownerId: getEffectiveOwnerId(g),
     memberCount: g._count.members,
     postCount: g._count.posts,
     myMembership: currentUserId && g.members && g.members[0] ? g.members[0] : null,
@@ -142,10 +192,13 @@ const getGroups = async (search?: string, myGroups?: boolean, currentUserId?: st
   }));
 };
 
-const getGroupBySlug = async (slug: string, currentUserId?: string, currentUserRole?: string) => {
+const getGroupBySlug = async (slug: string, currentUserId?: string, _currentUserRole?: string) => {
   const group = await prisma.group.findUnique({
     where: { slug },
     include: {
+      owner: {
+        select: { id: true, name: true, image: true },
+      },
       createdBy: {
         select: { id: true, name: true, image: true },
       },
@@ -165,7 +218,7 @@ const getGroupBySlug = async (slug: string, currentUserId?: string, currentUserR
     },
   });
 
-  if (!group) throw new Error('Group not found.');
+  if (!group || group.status === 'DELETED') throw new Error('Group not found.');
 
   let myMembership = null;
   if (currentUserId) {
@@ -179,30 +232,44 @@ const getGroupBySlug = async (slug: string, currentUserId?: string, currentUserR
     });
   }
 
-  const isGroupStaff =
-    myMembership && ['ADMIN', 'MODERATOR'].includes(myMembership.role) && myMembership.isApproved;
-  const isPlatformStaff = currentUserRole && ['ADMIN', 'MODERATOR'].includes(currentUserRole);
+  const effectiveOwnerId = getEffectiveOwnerId(group);
+  const isOwner = Boolean(currentUserId && effectiveOwnerId === currentUserId);
+  const isGroupStaff = Boolean(
+    isOwner ||
+      (myMembership &&
+        ['ADMIN', 'MODERATOR'].includes(myMembership.role) &&
+        myMembership.isApproved)
+  );
+
+  if (group.status === 'ARCHIVED' && !isOwner && !(myMembership?.role === 'ADMIN' && myMembership.isApproved)) {
+    throw new Error('This group has been archived.');
+  }
 
   let pendingRequestsCount = 0;
   let pendingPostsCount = 0;
 
-  if (isGroupStaff || isPlatformStaff) {
+  if (isGroupStaff) {
     [pendingRequestsCount, pendingPostsCount] = await Promise.all([
       prisma.groupMember.count({
         where: { groupId: group.id, isApproved: false },
       }),
       prisma.post.count({
-        where: { groupId: group.id, status: 'PENDING_APPROVAL' },
+        where: { groupId: group.id, status: 'PENDING_APPROVAL', deletedAt: null },
       }),
     ]);
   }
 
+  const canViewMembers = group.privacy === 'PUBLIC' || Boolean(myMembership?.isApproved) || isOwner;
+
   return {
     ...group,
+    ownerId: effectiveOwnerId,
+    owner: group.owner || group.createdBy || null,
+    members: canViewMembers ? group.members : [],
     memberCount: group._count.members,
     postCount: group._count.posts,
     myMembership,
-    canModerate: Boolean(isGroupStaff || isPlatformStaff),
+    canModerate: isGroupStaff,
     pendingRequestsCount,
     pendingPostsCount,
   };
@@ -250,10 +317,10 @@ const leaveGroup = async (userId: string, groupIdOrSlug: string) => {
       OR: [{ id: groupIdOrSlug }, { slug: groupIdOrSlug }],
     },
   });
-  if (!group) throw new Error('Group not found.');
+  if (!group || group.status === 'DELETED') throw new Error('Group not found.');
 
-  if (group.createdById === userId) {
-    throw new Error('Group creator cannot leave. Please delete the group or transfer ownership.');
+  if (getEffectiveOwnerId(group) === userId) {
+    throw new Error('Group owner cannot leave. Please transfer ownership or archive the group first.');
   }
 
   await prisma.groupMember.deleteMany({
@@ -265,26 +332,39 @@ const leaveGroup = async (userId: string, groupIdOrSlug: string) => {
 
 const handleJoinRequest = async (
   callerUserId: string,
-  callerRole: string,
+  _callerRole: string,
   groupId: string,
   memberId: string,
   action: 'APPROVE' | 'REJECT'
 ) => {
+  const group = await prisma.group.findUnique({ where: { id: groupId } });
+  if (!group || group.status === 'DELETED') throw new Error('Group not found.');
+
   const callerMembership = await prisma.groupMember.findUnique({
     where: { groupId_userId: { groupId, userId: callerUserId } },
   });
 
-  const isGroupStaff = callerMembership && ['ADMIN', 'MODERATOR'].includes(callerMembership.role);
-  const isPlatformStaff = ['ADMIN', 'MODERATOR'].includes(callerRole);
+  const isOwner = getEffectiveOwnerId(group) === callerUserId;
+  const isGroupStaff =
+    isOwner ||
+    Boolean(
+      callerMembership?.isApproved &&
+        ['ADMIN', 'MODERATOR'].includes(callerMembership.role)
+    );
 
-  if (!isGroupStaff && !isPlatformStaff) {
+  if (!isGroupStaff) {
     throw new Error('Only group admins and moderators can process join requests.');
+  }
+
+  const targetMember = await prisma.groupMember.findUnique({ where: { id: memberId } });
+  if (!targetMember || targetMember.groupId !== groupId) {
+    throw new Error('Membership request not found in this group.');
   }
 
   if (action === 'APPROVE') {
     return await prisma.groupMember.update({
       where: { id: memberId },
-      data: { isApproved: true },
+      data: { isApproved: true, role: 'MEMBER' },
     });
   } else {
     return await prisma.groupMember.delete({
@@ -295,73 +375,116 @@ const handleJoinRequest = async (
 
 const updateMemberRole = async (
   callerUserId: string,
-  callerRole: string,
+  _callerRole: string,
   groupId: string,
   memberId: string,
   newRole: 'ADMIN' | 'MODERATOR' | 'MEMBER'
 ) => {
-  const group = await prisma.group.findUnique({ where: { id: groupId } });
-  if (!group) throw new Error('Group not found.');
-
-  const callerMembership = await prisma.groupMember.findUnique({
-    where: { groupId_userId: { groupId, userId: callerUserId } },
-  });
-
-  const isGroupAdmin = group.createdById === callerUserId || callerMembership?.role === 'ADMIN';
-  const isPlatformAdmin = callerRole === 'ADMIN';
-
-  if (!isGroupAdmin && !isPlatformAdmin) {
-    throw new Error('Only a Group Admin can change member roles.');
+  if (!['ADMIN', 'MODERATOR', 'MEMBER'].includes(newRole)) {
+    throw new Error('Invalid group role.');
   }
 
-  const targetMember = await prisma.groupMember.findUnique({ where: { id: memberId } });
-  if (!targetMember) throw new Error('Member not found.');
+  return await prisma.$transaction(async (tx) => {
+    const group = await tx.group.findUnique({ where: { id: groupId } });
+    if (!group || group.status === 'DELETED') throw new Error('Group not found.');
 
-  if (targetMember.userId === group.createdById && newRole !== 'ADMIN') {
-    throw new Error('Cannot demote the group creator.');
-  }
+    const effectiveOwnerId = getEffectiveOwnerId(group);
+    const isOwner = effectiveOwnerId === callerUserId;
 
-  return await prisma.groupMember.update({
-    where: { id: memberId },
-    data: { role: newRole as any },
-    include: { user: { select: { id: true, name: true, image: true, email: true } } },
+    const callerMembership = await tx.groupMember.findUnique({
+      where: { groupId_userId: { groupId, userId: callerUserId } },
+    });
+
+    const isGroupAdmin =
+      isOwner || Boolean(callerMembership?.isApproved && callerMembership.role === 'ADMIN');
+
+    if (!isGroupAdmin) {
+      throw new Error('Only a Group Admin can change member roles.');
+    }
+
+    const targetMember = await tx.groupMember.findUnique({ where: { id: memberId } });
+    if (!targetMember || targetMember.groupId !== groupId) {
+      throw new Error('Member not found in this group.');
+    }
+
+    if (targetMember.userId === callerUserId) {
+      throw new Error('You cannot change your own role here.');
+    }
+
+    if (targetMember.userId === effectiveOwnerId && newRole !== 'ADMIN') {
+      throw new Error('Cannot demote the group owner.');
+    }
+
+    if (targetMember.role === 'ADMIN' && !isOwner && newRole !== 'ADMIN') {
+      throw new Error('Only the group owner can change another admin’s role.');
+    }
+
+    if (targetMember.role === 'ADMIN' && newRole !== 'ADMIN') {
+      const adminCount = await tx.groupMember.count({
+        where: { groupId, role: 'ADMIN', isApproved: true },
+      });
+      if (adminCount <= 1) {
+        throw new Error('Cannot demote the last active admin of the group.');
+      }
+    }
+
+    return await tx.groupMember.update({
+      where: { id: memberId },
+      data: { role: newRole as any },
+      include: { user: { select: { id: true, name: true, image: true, email: true } } },
+    });
   });
 };
 
 const removeMember = async (
   callerUserId: string,
-  callerRole: string,
+  _callerRole: string,
   groupId: string,
   memberId: string
 ) => {
-  const group = await prisma.group.findUnique({ where: { id: groupId } });
-  if (!group) throw new Error('Group not found.');
+  return await prisma.$transaction(async (tx) => {
+    const group = await tx.group.findUnique({ where: { id: groupId } });
+    if (!group || group.status === 'DELETED') throw new Error('Group not found.');
 
-  const callerMembership = await prisma.groupMember.findUnique({
-    where: { groupId_userId: { groupId, userId: callerUserId } },
+    const effectiveOwnerId = getEffectiveOwnerId(group);
+    const isOwner = effectiveOwnerId === callerUserId;
+
+    const callerMembership = await tx.groupMember.findUnique({
+      where: { groupId_userId: { groupId, userId: callerUserId } },
+    });
+
+    const isGroupAdmin =
+      isOwner || Boolean(callerMembership?.isApproved && callerMembership.role === 'ADMIN');
+    const isGroupMod = Boolean(callerMembership?.isApproved && callerMembership.role === 'MODERATOR');
+
+    if (!isGroupAdmin && !isGroupMod) {
+      throw new Error('Only group admins and moderators can remove members.');
+    }
+
+    const targetMember = await tx.groupMember.findUnique({ where: { id: memberId } });
+    if (!targetMember || targetMember.groupId !== groupId) {
+      throw new Error('Member not found in this group.');
+    }
+
+    if (targetMember.userId === effectiveOwnerId) {
+      throw new Error('Cannot remove the group owner.');
+    }
+
+    if (targetMember.userId === callerUserId) {
+      throw new Error('Use Leave Group to remove yourself.');
+    }
+
+    if (targetMember.role === 'ADMIN' && !isOwner) {
+      throw new Error('Only the group owner can remove another admin.');
+    }
+
+    if (isGroupMod && !isGroupAdmin && targetMember.role !== 'MEMBER') {
+      throw new Error('Moderators can only remove regular members.');
+    }
+
+    await tx.groupMember.delete({ where: { id: memberId } });
+    return true;
   });
-
-  const isGroupAdmin = group.createdById === callerUserId || callerMembership?.role === 'ADMIN';
-  const isGroupMod = callerMembership?.role === 'MODERATOR';
-  const isPlatformAdmin = callerRole === 'ADMIN';
-
-  if (!isGroupAdmin && !isGroupMod && !isPlatformAdmin) {
-    throw new Error('Only group admins and moderators can remove members.');
-  }
-
-  const targetMember = await prisma.groupMember.findUnique({ where: { id: memberId } });
-  if (!targetMember) throw new Error('Member not found.');
-
-  if (targetMember.userId === group.createdById) {
-    throw new Error('Cannot remove the group creator.');
-  }
-
-  if (isGroupMod && !isGroupAdmin && targetMember.role !== 'MEMBER') {
-    throw new Error('Moderators can only remove regular members.');
-  }
-
-  await prisma.groupMember.delete({ where: { id: memberId } });
-  return true;
 };
 
 const addMember = async (
@@ -448,38 +571,195 @@ const updateGroupCover = async (
 
 const updateGroupSettings = async (
   callerUserId: string,
-  callerRole: string,
-  groupId: string,
-  settings: any
+  _callerRole: string,
+  groupIdOrSlug: string,
+  settings: UpdateGroupSettingsInput
 ) => {
-  const group = await prisma.group.findUnique({ where: { id: groupId } });
-  if (!group) throw new Error('Group not found.');
+  const group = await prisma.group.findFirst({
+    where: {
+      OR: [{ id: groupIdOrSlug }, { slug: groupIdOrSlug }],
+    },
+  });
+  if (!group || group.status === 'DELETED') throw new Error('Group not found.');
 
   const callerMembership = await prisma.groupMember.findUnique({
-    where: { groupId_userId: { groupId, userId: callerUserId } },
+    where: { groupId_userId: { groupId: group.id, userId: callerUserId } },
   });
 
-  const isStaff =
-    group.createdById === callerUserId ||
-    ['ADMIN', 'MODERATOR'].includes(callerMembership?.role || '');
-  const isPlatformStaff = ['ADMIN', 'MODERATOR'].includes(callerRole);
+  const isOwner = getEffectiveOwnerId(group) === callerUserId;
+  const isGroupAdmin =
+    isOwner || Boolean(callerMembership?.isApproved && callerMembership.role === 'ADMIN');
 
-  if (!isStaff && !isPlatformStaff) {
-    throw new Error('Only group admins and moderators can modify group settings.');
+  if (!isGroupAdmin) {
+    throw new Error('Only group admins can modify group settings.');
   }
 
-  return await prisma.group.update({
-    where: { id: groupId },
+  if (settings.name !== undefined) {
+    const trimmed = settings.name.trim();
+    if (trimmed.length < 2 || trimmed.length > 120) {
+      throw new Error('Group name must be between 2 and 120 characters.');
+    }
+  }
+
+  if (settings.privacy !== undefined && !['PUBLIC', 'PRIVATE'].includes(settings.privacy)) {
+    throw new Error('Invalid group privacy setting.');
+  }
+
+  if (
+    settings.discoverability !== undefined &&
+    !['VISIBLE', 'HIDDEN'].includes(settings.discoverability)
+  ) {
+    throw new Error('Invalid discoverability setting.');
+  }
+
+  if (
+    settings.challengeCreatorPolicy !== undefined &&
+    !['STAFF', 'MEMBERS'].includes(settings.challengeCreatorPolicy)
+  ) {
+    throw new Error('Invalid challenge creator policy.');
+  }
+
+  await prisma.group.update({
+    where: { id: group.id },
     data: {
       name: settings.name !== undefined ? settings.name.trim() : undefined,
       description: settings.description !== undefined ? settings.description : undefined,
       coverImage: settings.coverImage !== undefined ? settings.coverImage : undefined,
       avatar: settings.avatar !== undefined ? settings.avatar : undefined,
       privacy: settings.privacy !== undefined ? settings.privacy : undefined,
+      discoverability:
+        settings.discoverability !== undefined ? settings.discoverability : undefined,
       requiresPostApproval:
-        settings.requiresPostApproval !== undefined ? Boolean(settings.requiresPostApproval) : undefined,
+        settings.requiresPostApproval !== undefined
+          ? Boolean(settings.requiresPostApproval)
+          : undefined,
+      challengeCreatorPolicy:
+        settings.challengeCreatorPolicy !== undefined
+          ? settings.challengeCreatorPolicy
+          : undefined,
+      version: { increment: 1 },
     },
   });
+
+  return await getGroupBySlug(group.slug, callerUserId);
+};
+
+const transferGroupOwnership = async (
+  callerUserId: string,
+  groupId: string,
+  newOwnerUserId: string
+) => {
+  if (!newOwnerUserId) throw new Error('Target owner user ID is required.');
+
+  const updatedSlug = await prisma.$transaction(async (tx) => {
+    const group = await tx.group.findUnique({ where: { id: groupId } });
+    if (!group || group.status === 'DELETED') throw new Error('Group not found.');
+
+    const effectiveOwnerId = getEffectiveOwnerId(group);
+    if (effectiveOwnerId !== callerUserId) {
+      throw new Error('Only the current group owner can transfer ownership.');
+    }
+
+    if (newOwnerUserId === callerUserId) {
+      throw new Error('You are already the owner of this group.');
+    }
+
+    const targetMembership = await tx.groupMember.findUnique({
+      where: {
+        groupId_userId: { groupId, userId: newOwnerUserId },
+      },
+    });
+
+    if (!targetMembership || !targetMembership.isApproved) {
+      throw new Error('The new owner must be an active approved member of this group.');
+    }
+
+    if (targetMembership.role !== 'ADMIN') {
+      await tx.groupMember.update({
+        where: { id: targetMembership.id },
+        data: { role: 'ADMIN' },
+      });
+    }
+
+    await tx.group.update({
+      where: { id: groupId },
+      data: {
+        ownerId: newOwnerUserId,
+        version: { increment: 1 },
+      },
+    });
+
+    return group.slug;
+  });
+
+  return await getGroupBySlug(updatedSlug, callerUserId);
+};
+
+const updateGroupLifecycle = async (
+  callerUserId: string,
+  groupId: string,
+  action: 'PAUSE' | 'RESUME' | 'ARCHIVE' | 'DELETE'
+) => {
+  if (!['PAUSE', 'RESUME', 'ARCHIVE', 'DELETE'].includes(action)) {
+    throw new Error('Invalid lifecycle action.');
+  }
+
+  const group = await prisma.group.findUnique({ where: { id: groupId } });
+  if (!group || group.status === 'DELETED') throw new Error('Group not found.');
+
+  const effectiveOwnerId = getEffectiveOwnerId(group);
+  const isOwner = effectiveOwnerId === callerUserId;
+
+  const callerMembership = await prisma.groupMember.findUnique({
+    where: { groupId_userId: { groupId, userId: callerUserId } },
+  });
+  const isGroupAdmin =
+    isOwner || Boolean(callerMembership?.isApproved && callerMembership.role === 'ADMIN');
+
+  if (action === 'ARCHIVE' || action === 'DELETE') {
+    if (!isOwner) {
+      throw new Error('Only the group owner can archive or delete the group.');
+    }
+  } else if (!isGroupAdmin) {
+    throw new Error('Only group admins can pause or resume the group.');
+  }
+
+  const nextStatus =
+    action === 'PAUSE'
+      ? 'PAUSED'
+      : action === 'RESUME'
+      ? 'ACTIVE'
+      : action === 'ARCHIVE'
+      ? 'ARCHIVED'
+      : 'DELETED';
+
+  const updated = await prisma.group.update({
+    where: { id: groupId },
+    data: {
+      status: nextStatus,
+      archivedAt: action === 'ARCHIVE' || action === 'DELETE' ? new Date() : null,
+      version: { increment: 1 },
+    },
+    include: {
+      owner: { select: { id: true, name: true, image: true } },
+      createdBy: { select: { id: true, name: true, image: true } },
+      _count: {
+        select: {
+          members: { where: { isApproved: true } },
+          posts: { where: { status: 'PUBLISHED' } },
+        },
+      },
+    },
+  });
+
+  return {
+    ...updated,
+    ownerId: getEffectiveOwnerId(updated),
+    memberCount: updated._count.members,
+    postCount: updated._count.posts,
+    myMembership: callerMembership,
+    canModerate: isGroupAdmin,
+  };
 };
 
 export const GroupService = {
@@ -494,6 +774,8 @@ export const GroupService = {
   addMember,
   updateGroupCover,
   updateGroupSettings,
+  transferGroupOwnership,
+  updateGroupLifecycle,
 };
 
 export default GroupService;

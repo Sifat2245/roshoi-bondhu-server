@@ -11,10 +11,11 @@ export const friendsResolvers = {
             return friends.map((f) => ({
                 id: f.id,
                 name: f.name,
+                username: f.username || '',
                 email: f.email || '',
                 image: f.image || null,
                 bio: f.bio || '',
-                mutualCount: f.mutualCount ?? 0,
+                mutualCount: f.mutualCount ?? f.mutualFriends ?? 0,
             }));
         },
         friendRequests: async (_parent, _args, context) => {
@@ -23,18 +24,18 @@ export const friendsResolvers = {
             const requests = await FriendsService.getFriendRequests(context.currentUser.id);
             return requests.map((r) => ({
                 id: r.id,
-                senderId: r.senderId,
-                receiverId: r.receiverId,
-                status: r.status,
+                senderId: r.senderId || r.userId || r.sender?.id || '',
+                receiverId: r.receiverId || context.currentUser.id,
+                status: r.status || 'PENDING',
                 sender: {
-                    id: r.sender?.id,
-                    name: r.sender?.name,
-                    image: r.sender?.image,
-                    username: r.sender?.profile?.username,
-                    city: r.sender?.profile?.city,
-                    bio: r.sender?.profile?.bio,
+                    id: r.sender?.id || r.userId || r.senderId || '',
+                    name: r.sender?.name || r.name || 'Chef',
+                    image: r.sender?.image ?? r.image ?? null,
+                    username: r.sender?.username ?? r.sender?.profile?.username ?? r.username ?? '',
+                    city: r.sender?.city ?? r.sender?.profile?.city ?? r.city ?? null,
+                    bio: r.sender?.bio ?? r.sender?.profile?.bio ?? r.bio ?? null,
                 },
-                mutualFriendsCount: r.mutualFriendsCount ?? 0,
+                mutualFriendsCount: r.mutualFriendsCount ?? r.mutualFriends ?? 0,
                 createdAt: r.createdAt instanceof Date ? r.createdAt.toISOString() : String(r.createdAt || ''),
             }));
         },
@@ -45,10 +46,11 @@ export const friendsResolvers = {
             return suggestions.map((s) => ({
                 id: s.id,
                 name: s.name,
+                username: s.username || '',
                 email: s.email || '',
                 image: s.image || null,
                 bio: s.bio || s.profile?.bio || '',
-                mutualCount: s.mutualFriendsCount ?? s.mutualCount ?? 0,
+                mutualCount: s.mutualFriendsCount ?? s.mutualCount ?? s.mutualFriends ?? 0,
             }));
         },
         blockedUsers: async (_parent, _args, context) => {

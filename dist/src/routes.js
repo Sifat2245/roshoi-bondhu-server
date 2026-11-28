@@ -6,6 +6,8 @@ import { userRoutes } from './modules/users/user.routes.js';
 import { adminRoutes } from './modules/admin/admin.routes.js';
 import { mediaRoutes } from './modules/media/media.routes.js';
 import { friendsRoutes } from './modules/friends/friends.routes.js';
+import { requireAuth } from './middleware/auth.middleware.js';
+import { AdminController } from './modules/admin/admin.controller.js';
 const router = Router();
 // Modular application REST routes
 router.use('/auth', authRoutes);
@@ -19,6 +21,7 @@ router.use('/user', userRoutes);
 router.use('/users', userRoutes);
 router.use('/me', userRoutes);
 router.use('/admin', adminRoutes);
+router.post('/reports', requireAuth, AdminController.submitReport);
 router.use('/upload', mediaRoutes);
 router.use('/media', mediaRoutes);
 export const appRouter = router;

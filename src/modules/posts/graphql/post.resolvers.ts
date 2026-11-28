@@ -39,7 +39,7 @@ export const postResolvers = {
         deletedAt: null,
       };
 
-      if (type && ['CASUAL', 'RECIPE', 'REPOST'].includes(type.toUpperCase())) {
+      if (type && ['CASUAL', 'RECIPE', 'REPOST', 'POLL'].includes(type.toUpperCase())) {
         where.postType = type.toUpperCase();
       }
 
@@ -198,93 +198,95 @@ export const postResolvers = {
         }
       }
 
-      // Audience & Candidate Sourcing Filters
-      if (currentUserId) {
-        const friendIds = Array.from(friendIdsSet);
+      // Audience & Candidate Sourcing Filters (applied for personal/general feeds, not single-group streams)
+      if (!groupId) {
+        if (currentUserId) {
+          const friendIds = Array.from(friendIdsSet);
 
-        if (authorId) {
-          if (authorId !== currentUserId) {
-            const isFriend = friendIdsSet.has(authorId);
-            where.audience = isFriend ? { in: ['PUBLIC', 'FRIENDS'] } : 'PUBLIC';
-          }
-        } else if (upperFilter === 'FRIENDS' || upperFilter === 'FOLLOWING') {
-          where.OR = [
-            { authorId: currentUserId },
-            { audience: 'PUBLIC' },
-            { audience: 'FRIENDS', authorId: { in: friendIds } },
-          ];
-        } else {
-          // Default Smart Candidate Sourcing:
-          // 1. Own posts
-          // 2. Friends' posts (Public & Friends)
-          // 3. Followed accounts' public posts
-          // 4. Posts from joined groups
-          // 5. Public recipes from any user
-          // 6. Public posts from strangers ONLY if they have engagement or match location/education/work
-          const audienceOr: any[] = [
-            { authorId: currentUserId },
-            { postType: 'RECIPE', audience: 'PUBLIC' },
-          ];
-
-          if (friendIds.length > 0) {
-            audienceOr.push({
-              audience: 'FRIENDS',
-              authorId: { in: friendIds },
-            });
-            audienceOr.push({
-              audience: 'PUBLIC',
-              authorId: { in: friendIds },
-            });
-          }
-
-          if (followingIds.length > 0) {
-            audienceOr.push({
-              audience: 'PUBLIC',
-              authorId: { in: followingIds },
-            });
-          }
-
-          if (myGroupIds.length > 0) {
-            audienceOr.push({
-              groupId: { in: myGroupIds },
-            });
-          }
-
-          // Engaging or contextually-matched public posts from the community
-          const discoveryConditions: any[] = [
-            { likes: { some: {} } },
-            { comments: { some: {} } },
-          ];
-          if (myCity) {
-            discoveryConditions.push({
-              author: { profile: { city: { contains: myCity, mode: 'insensitive' } } },
-            });
-          }
-          if (myEducation) {
-            discoveryConditions.push({
-              author: { profile: { education: { contains: myEducation, mode: 'insensitive' } } },
-            });
-          }
-          if (myWork) {
-            discoveryConditions.push({
-              author: { profile: { work: { contains: myWork, mode: 'insensitive' } } },
-            });
-          }
-
-          audienceOr.push({
-            audience: 'PUBLIC',
-            OR: discoveryConditions,
-          });
-
-          if (where.OR) {
-            where.AND = [{ OR: where.OR }, { OR: audienceOr }];
-            delete where.OR;
+          if (authorId) {
+            if (authorId !== currentUserId) {
+              const isFriend = friendIdsSet.has(authorId);
+              where.audience = isFriend ? { in: ['PUBLIC', 'FRIENDS'] } : 'PUBLIC';
+            }
+          } else if (upperFilter === 'FRIENDS' || upperFilter === 'FOLLOWING') {
+            where.OR = [
+              { authorId: currentUserId },
+              { audience: 'PUBLIC' },
+              { audience: 'FRIENDS', authorId: { in: friendIds } },
+            ];
           } else {
-            where.OR = audienceOr;
+            // Default Smart Candidate Sourcing:
+            // 1. Own posts
+            // 2. Friends' posts (Public & Friends)
+            // 3. Followed accounts' public posts
+            // 4. Posts from joined groups
+            // 5. Public recipes from any user
+            // 6. Public posts from strangers ONLY if they have engagement or match location/education/work
+            const audienceOr: any[] = [
+              { authorId: currentUserId },
+              { postType: 'RECIPE', audience: 'PUBLIC' },
+            ];
+
+            if (friendIds.length > 0) {
+              audienceOr.push({
+                audience: 'FRIENDS',
+                authorId: { in: friendIds },
+              });
+              audienceOr.push({
+                audience: 'PUBLIC',
+                authorId: { in: friendIds },
+              });
+            }
+
+            if (followingIds.length > 0) {
+              audienceOr.push({
+                audience: 'PUBLIC',
+                authorId: { in: followingIds },
+              });
+            }
+
+            if (myGroupIds.length > 0) {
+              audienceOr.push({
+                groupId: { in: myGroupIds },
+              });
+            }
+
+            // Engaging or contextually-matched public posts from the community
+            const discoveryConditions: any[] = [
+              { likes: { some: {} } },
+              { comments: { some: {} } },
+            ];
+            if (myCity) {
+              discoveryConditions.push({
+                author: { profile: { city: { contains: myCity, mode: 'insensitive' } } },
+              });
+            }
+            if (myEducation) {
+              discoveryConditions.push({
+                author: { profile: { education: { contains: myEducation, mode: 'insensitive' } } },
+              });
+            }
+            if (myWork) {
+              discoveryConditions.push({
+                author: { profile: { work: { contains: myWork, mode: 'insensitive' } } },
+              });
+            }
+
+            audienceOr.push({
+              audience: 'PUBLIC',
+              OR: discoveryConditions,
+            });
+
+            if (where.OR) {
+              where.AND = [{ OR: where.OR }, { OR: audienceOr }];
+              delete where.OR;
+            } else {
+              where.OR = audienceOr;
+            }
           }
+        } else {
+          where.audience = 'PUBLIC';
         }
-      } else {
-        where.audience = 'PUBLIC';
       }
 
       // If not querying a specific group, ensure posts from private groups do not leak into the general feed
@@ -349,7 +351,10 @@ export const postResolvers = {
             name: true,
             slug: true,
             avatar: true,
+            coverImage: true,
             privacy: true,
+            ownerId: true,
+            createdById: true,
           },
         },
         originalPost: {
@@ -493,7 +498,9 @@ export const postResolvers = {
         nodes = hasNextPage ? posts.slice(0, limit) : posts;
       }
 
-      const edges = nodes.map((post: any) => ({
+      const nodesWithRoles = await PostService.attachAuthorGroupRoles(nodes, currentUserId);
+
+      const edges = nodesWithRoles.map((post: any) => ({
         cursor: toBase64(post.id),
         node: {
           ...post,

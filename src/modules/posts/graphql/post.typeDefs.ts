@@ -33,7 +33,9 @@ export const postTypeDefs = /* GraphQL */ `
     name: String!
     slug: String!
     avatar: String
+    coverImage: String
     privacy: String
+    isMember: Boolean
   }
 
   type PostCommentReply {
@@ -109,6 +111,7 @@ export const postTypeDefs = /* GraphQL */ `
     id: ID!
     authorId: String!
     author: PostAuthor
+    authorGroupRole: String
     groupId: String
     group: PostGroup
     postType: PostType

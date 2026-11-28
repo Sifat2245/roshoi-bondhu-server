@@ -2,6 +2,7 @@ export const friendsTypeDefs = /* GraphQL */ `
   type Friend {
     id: ID!
     name: String!
+    username: String
     email: String
     image: String
     bio: String

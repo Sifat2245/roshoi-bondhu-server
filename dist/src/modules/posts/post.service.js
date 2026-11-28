@@ -2,6 +2,56 @@ import prisma from '../../lib/prisma.js';
 import { paginationUtils } from '../../shared/pagination/pagination.js';
 import { FriendsService } from '../friends/friends.service.js';
 const db = prisma;
+const attachAuthorGroupRoles = async (posts, viewerUserId) => {
+    const groupPosts = posts.filter((p) => p.groupId && p.authorId);
+    if (groupPosts.length === 0) {
+        return posts.map((p) => ({ ...p, authorGroupRole: null }));
+    }
+    const groupIds = Array.from(new Set(groupPosts.map((p) => p.groupId)));
+    const userIds = Array.from(new Set([
+        ...groupPosts.map((p) => p.authorId),
+        ...(viewerUserId ? [viewerUserId] : []),
+    ]));
+    const memberships = await prisma.groupMember.findMany({
+        where: {
+            groupId: { in: groupIds },
+            userId: { in: userIds },
+            isApproved: true,
+        },
+        select: {
+            groupId: true,
+            userId: true,
+            role: true,
+        },
+    });
+    const roleMap = new Map();
+    for (const m of memberships) {
+        roleMap.set(`${m.groupId}:${m.userId}`, m.role);
+    }
+    return posts.map((post) => {
+        if (!post.groupId || !post.authorId) {
+            return { ...post, authorGroupRole: null };
+        }
+        const effectiveOwnerId = post.group?.ownerId || post.group?.createdById;
+        const authorGroupRole = effectiveOwnerId && effectiveOwnerId === post.authorId
+            ? 'ADMIN'
+            : roleMap.get(`${post.groupId}:${post.authorId}`) || null;
+        const viewerIsMember = viewerUserId
+            ? (effectiveOwnerId && effectiveOwnerId === viewerUserId) ||
+                roleMap.has(`${post.groupId}:${viewerUserId}`)
+            : false;
+        return {
+            ...post,
+            authorGroupRole,
+            group: post.group
+                ? {
+                    ...post.group,
+                    isMember: viewerIsMember,
+                }
+                : post.group,
+        };
+    });
+};
 const getFeed = async (query, currentUserId) => {
     const { page, limit, skip } = paginationUtils.getPaginationOptions(query);
     const { type, cuisine, search, authorId, groupId, filter } = query;
@@ -205,7 +255,10 @@ const getPostById = async (id, currentUserId) => {
                     name: true,
                     slug: true,
                     avatar: true,
+                    coverImage: true,
                     privacy: true,
+                    ownerId: true,
+                    createdById: true,
                 },
             },
             originalPost: {
@@ -295,6 +348,31 @@ const getPostById = async (id, currentUserId) => {
     if (!post || post.deletedAt) {
         throw new Error('Post not found');
     }
+    // Group privacy and pending-approval access control
+    if (post.groupId) {
+        const membership = currentUserId
+            ? await prisma.groupMember.findUnique({
+                where: {
+                    groupId_userId: { groupId: post.groupId, userId: currentUserId },
+                },
+            })
+            : null;
+        if (post.group?.privacy === 'PRIVATE') {
+            if (!membership || !membership.isApproved) {
+                throw new Error('This post belongs to a private group.');
+            }
+        }
+        if (post.status !== 'PUBLISHED') {
+            const isAuthor = currentUserId && post.authorId === currentUserId;
+            const isGroupStaff = membership && membership.isApproved && ['ADMIN', 'MODERATOR'].includes(membership.role);
+            if (!isAuthor && !isGroupStaff) {
+                throw new Error('Post not found');
+            }
+        }
+    }
+    else if (post.status !== 'PUBLISHED' && post.authorId !== currentUserId) {
+        throw new Error('Post not found');
+    }
     // Audience & Block access control (Phase 4)
     if (currentUserId) {
         if (post.authorId !== currentUserId) {
@@ -310,24 +388,27 @@ const getPostById = async (id, currentUserId) => {
             if (isBlocked) {
                 throw new Error('Post not found');
             }
-            if (post.audience === 'ONLY_ME') {
-                throw new Error('This post is private.');
-            }
-            if (post.audience === 'FRIENDS') {
-                const friendIds = await FriendsService.getFriendIdsForUser(currentUserId);
-                if (!friendIds.has(post.authorId)) {
-                    throw new Error('This post is only visible to friends of the author.');
+            if (!post.groupId) {
+                if (post.audience === 'ONLY_ME') {
+                    throw new Error('This post is private.');
+                }
+                if (post.audience === 'FRIENDS') {
+                    const friendIds = await FriendsService.getFriendIdsForUser(currentUserId);
+                    if (!friendIds.has(post.authorId)) {
+                        throw new Error('This post is only visible to friends of the author.');
+                    }
                 }
             }
         }
     }
     else {
-        if (post.audience !== 'PUBLIC') {
+        if (!post.groupId && post.audience !== 'PUBLIC') {
             throw new Error('This post is private. Please sign in to view.');
         }
     }
+    const [withRole] = await attachAuthorGroupRoles([post], currentUserId);
     return {
-        ...post,
+        ...withRole,
         likeCount: post._count.likes,
         commentCount: post._count.comments,
         repostCount: post._count.reposts,
@@ -356,8 +437,14 @@ const createPost = async (authorId, postData, userRole) => {
                 },
             },
         });
-        if (!group)
+        if (!group || group.status === 'DELETED')
             throw new Error('Target group not found.');
+        if (group.status === 'PAUSED') {
+            throw new Error('This group is currently paused and not accepting new posts.');
+        }
+        if (group.status === 'ARCHIVED') {
+            throw new Error('This group has been archived.');
+        }
         const membership = group.members[0];
         if (!membership || !membership.isApproved) {
             throw new Error('You are not an approved member of this group.');
@@ -430,7 +517,16 @@ const createPost = async (authorId, postData, userRole) => {
                 select: { id: true, name: true, image: true, role: true },
             },
             group: {
-                select: { id: true, name: true, slug: true },
+                select: {
+                    id: true,
+                    name: true,
+                    slug: true,
+                    avatar: true,
+                    coverImage: true,
+                    privacy: true,
+                    ownerId: true,
+                    createdById: true,
+                },
             },
             poll: {
                 include: {
@@ -449,7 +545,8 @@ const createPost = async (authorId, postData, userRole) => {
             },
         },
     });
-    return newPost;
+    const [withRole] = await attachAuthorGroupRoles([newPost], authorId);
+    return withRole;
 };
 const repostPost = async (authorId, originalPostId, caption, groupId, audience) => {
     if (!originalPostId)
@@ -780,6 +877,16 @@ const votePoll = async (userId, pollId, optionId) => {
         throw new Error('Voting has ended for this poll.');
     }
     if (poll.post?.groupId) {
+        const group = await prisma.group.findUnique({
+            where: { id: poll.post.groupId },
+            select: { status: true },
+        });
+        if (group?.status === 'PAUSED') {
+            throw new Error('This group is currently paused and not accepting votes.');
+        }
+        if (group?.status === 'ARCHIVED' || group?.status === 'DELETED') {
+            throw new Error('This group is no longer active.');
+        }
         const membership = await prisma.groupMember.findFirst({
             where: { groupId: poll.post.groupId, userId, isApproved: true },
         });
@@ -913,6 +1020,7 @@ const deletePoll = async (userId, userRole, pollId) => {
     return true;
 };
 export const PostService = {
+    attachAuthorGroupRoles,
     getFeed,
     getPostById,
     createPost,

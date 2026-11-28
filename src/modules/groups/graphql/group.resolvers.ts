@@ -147,16 +147,65 @@ export const groupResolvers = {
         args.coverImage
       );
     },
+
+    updateGroupSettings: async (
+      _parent: unknown,
+      args: { groupId: string; input: any },
+      context: GraphQLContext
+    ) => {
+      if (!context.currentUser) {
+        throw new Error('Authentication required.');
+      }
+      return await GroupService.updateGroupSettings(
+        context.currentUser.id,
+        context.currentUser.role,
+        args.groupId,
+        args.input || {}
+      );
+    },
+
+    transferGroupOwnership: async (
+      _parent: unknown,
+      args: { groupId: string; newOwnerUserId: string },
+      context: GraphQLContext
+    ) => {
+      if (!context.currentUser) {
+        throw new Error('Authentication required.');
+      }
+      return await GroupService.transferGroupOwnership(
+        context.currentUser.id,
+        args.groupId,
+        args.newOwnerUserId
+      );
+    },
+
+    updateGroupLifecycle: async (
+      _parent: unknown,
+      args: { groupId: string; action: 'PAUSE' | 'RESUME' | 'ARCHIVE' | 'DELETE' },
+      context: GraphQLContext
+    ) => {
+      if (!context.currentUser) {
+        throw new Error('Authentication required.');
+      }
+      return await GroupService.updateGroupLifecycle(
+        context.currentUser.id,
+        args.groupId,
+        args.action
+      );
+    },
   },
 
   Group: {
     membersCount: (g: any) => g._count?.members ?? g.memberCount ?? g.membersCount ?? (g.members?.length || 0),
     postsCount: (g: any) => g._count?.posts ?? g.postCount ?? g.postsCount ?? 0,
+    ownerId: (g: any) => g.ownerId || g.createdById || null,
+    owner: (g: any) => g.owner || g.createdBy || null,
     isMember: (g: any, _args: unknown, context: GraphQLContext) => {
       if (g.isMember !== undefined) return g.isMember;
       if (g.myMembership) return Boolean(g.myMembership.isApproved);
       if (context.currentUser?.id) {
-        if (g.createdById === context.currentUser.id) return true;
+        const effectiveOwnerId = g.ownerId || g.createdById;
+        if (effectiveOwnerId === context.currentUser.id) return true;
         if (g.members && Array.isArray(g.members)) {
           return g.members.some(
             (m: any) =>
@@ -169,7 +218,8 @@ export const groupResolvers = {
     },
     currentUserRole: (g: any, _args: unknown, context: GraphQLContext) => {
       if (g.currentUserRole !== undefined) return g.currentUserRole;
-      if (context.currentUser?.id && g.createdById === context.currentUser.id) return 'ADMIN';
+      const effectiveOwnerId = g.ownerId || g.createdById;
+      if (context.currentUser?.id && effectiveOwnerId === context.currentUser.id) return 'ADMIN';
       if (g.myMembership) return g.myMembership.role;
       if (context.currentUser?.id) {
         if (g.members && Array.isArray(g.members)) {
@@ -183,11 +233,14 @@ export const groupResolvers = {
     },
     canModerate: (g: any, _args: unknown, context: GraphQLContext) => {
       if (g.canModerate !== undefined) return g.canModerate;
-      if (context.currentUser?.id && g.createdById === context.currentUser.id) return true;
+      const effectiveOwnerId = g.ownerId || g.createdById;
+      if (context.currentUser?.id && effectiveOwnerId === context.currentUser.id) return true;
       if (g.myMembership && ['ADMIN', 'MODERATOR'].includes(g.myMembership.role)) return true;
       return false;
     },
     createdBy: (g: any) => g.createdBy || null,
+    archivedAt: (g: any) =>
+      g.archivedAt instanceof Date ? g.archivedAt.toISOString() : g.archivedAt ? String(g.archivedAt) : null,
     createdAt: (g: any) =>
       g.createdAt instanceof Date ? g.createdAt.toISOString() : g.createdAt ? String(g.createdAt) : null,
   },

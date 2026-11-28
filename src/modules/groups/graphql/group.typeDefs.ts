@@ -21,8 +21,15 @@ export const groupTypeDefs = /* GraphQL */ `
     coverImage: String
     avatar: String
     privacy: String!
+    discoverability: String
+    status: String
     requiresPostApproval: Boolean
-    createdById: ID!
+    challengeCreatorPolicy: String
+    version: Int
+    archivedAt: String
+    ownerId: ID
+    owner: GroupMemberUser
+    createdById: ID
     createdBy: GroupMemberUser
     members: [GroupMember!]
     membersCount: Int
@@ -30,7 +37,20 @@ export const groupTypeDefs = /* GraphQL */ `
     isMember: Boolean
     currentUserRole: String
     canModerate: Boolean
+    pendingRequestsCount: Int
+    pendingPostsCount: Int
     createdAt: String
+  }
+
+  input UpdateGroupSettingsInput {
+    name: String
+    description: String
+    coverImage: String
+    avatar: String
+    privacy: String
+    discoverability: String
+    requiresPostApproval: Boolean
+    challengeCreatorPolicy: String
   }
 
   type Query {
@@ -53,6 +73,9 @@ export const groupTypeDefs = /* GraphQL */ `
     removeGroupMember(groupId: ID!, memberId: ID!): Boolean!
     addGroupMember(groupId: ID!, userId: ID!, role: String): GroupMember!
     updateGroupCover(groupId: ID!, coverImage: String!): Group!
+    updateGroupSettings(groupId: ID!, input: UpdateGroupSettingsInput!): Group!
+    transferGroupOwnership(groupId: ID!, newOwnerUserId: ID!): Group!
+    updateGroupLifecycle(groupId: ID!, action: String!): Group!
   }
 `;
 
